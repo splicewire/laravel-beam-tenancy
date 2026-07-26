@@ -1,6 +1,6 @@
 <?php
 
-namespace Splicewire\SatelliteMultiTenancy\Concerns;
+namespace Splicewire\Beam\MultiTenancy\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 
@@ -30,7 +30,7 @@ trait DesignatedSystemTenant
      */
     public static function systemSlug(): string
     {
-        return config('splicewire.multi_tenancy.system_tenant.slug', 'system');
+        return config('beam-multi-tenancy.system_tenant.slug', 'system');
     }
 
     /**
@@ -38,7 +38,7 @@ trait DesignatedSystemTenant
      */
     public static function systemName(): string
     {
-        return config('splicewire.multi_tenancy.system_tenant.name', 'System');
+        return config('beam-multi-tenancy.system_tenant.name', 'System');
     }
 
     /**
@@ -46,7 +46,7 @@ trait DesignatedSystemTenant
      */
     public static function systemRole(): string
     {
-        return config('splicewire.multi_tenancy.system_tenant.role', 'system');
+        return config('beam-multi-tenancy.system_tenant.role', 'system');
     }
 
     /**

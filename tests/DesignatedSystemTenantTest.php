@@ -1,6 +1,6 @@
 <?php
 
-use Splicewire\SatelliteMultiTenancy\Tests\Fixtures\TestTenant;
+use Splicewire\Beam\MultiTenancy\Tests\Fixtures\TestTenant;
 
 it('resolves the system tenant by its role marker', function () {
     $tenant = TestTenant::create(['id' => 'acme', 'name' => 'Acme']);
@@ -22,7 +22,7 @@ it('returns null when no tenant is marked as system', function () {
 it('honors a config/env override for the slug and defaults to system', function () {
     expect(TestTenant::systemSlug())->toBe('system');
 
-    config(['splicewire.multi_tenancy.system_tenant.slug' => 'hub']);
+    config(['beam-multi-tenancy.system_tenant.slug' => 'hub']);
 
     expect(TestTenant::systemSlug())->toBe('hub');
 });
@@ -57,7 +57,7 @@ it('provisions the system tenant idempotently', function () {
 });
 
 it('resolves a custom role override', function () {
-    config(['splicewire.multi_tenancy.system_tenant.role' => 'internal']);
+    config(['beam-multi-tenancy.system_tenant.role' => 'internal']);
 
     $tenant = TestTenant::create(['id' => 'acme', 'name' => 'Acme']);
     $tenant->markAsSystem();

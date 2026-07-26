@@ -1,8 +1,11 @@
 {
-    "name": "splicewire/laravel-satellite-multi-tenancy",
+    "name": "splicewire/laravel-beam-multi-tenancy",
     "description": "Resolves a stancl multi-tenant app's one designated system tenant by a configurable slug + role marker.",
     "type": "library",
     "license": "MIT",
+    "replace": {
+        "splicewire/laravel-satellite-multi-tenancy": "self.version"
+    },
     "authors": [
         {
             "name": "Stephen Rushing",
@@ -23,12 +26,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Splicewire\\SatelliteMultiTenancy\\": "src/"
+            "Splicewire\\Beam\\MultiTenancy\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Splicewire\\SatelliteMultiTenancy\\Tests\\": "tests/"
+            "Splicewire\\Beam\\MultiTenancy\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -41,7 +44,7 @@
         },
         "laravel": {
             "providers": [
-                "Splicewire\\SatelliteMultiTenancy\\SatelliteMultiTenancyServiceProvider"
+                "Splicewire\\Beam\\MultiTenancy\\BeamMultiTenancyServiceProvider"
             ]
         }
     },

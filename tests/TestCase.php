@@ -1,18 +1,18 @@
 <?php
 
-namespace Splicewire\SatelliteMultiTenancy\Tests;
+namespace Splicewire\Beam\MultiTenancy\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
-use Splicewire\SatelliteMultiTenancy\SatelliteMultiTenancyServiceProvider;
+use Splicewire\Beam\MultiTenancy\BeamMultiTenancyServiceProvider;
 
 class TestCase extends Orchestra
 {
     protected function getPackageProviders($app): array
     {
         return [
-            SatelliteMultiTenancyServiceProvider::class,
+            BeamMultiTenancyServiceProvider::class,
         ];
     }
 
