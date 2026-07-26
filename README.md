@@ -17,7 +17,18 @@ The following are planned as **later modules of this same package**, not part of
 v1:
 
 - Base stancl tenancy wiring.
-- ADR-0043 brokering extraction.
+
+> **Not in this package: ADR-0043 brokering.** Brokering (a satellite provisioning
+> child tenants per customer and reselling the isolated workspace, billing rolled up
+> via `parent_tenant_id`) is a **satellite / paid** concern owned by **entreport**,
+> and ADR-0043 explicitly declares it is *"an entitlement + service identity + parent
+> pointer + async + a typed client resource, **not a new tenancy substrate**"* — a
+> cross-cutting concern spread across the satellite core (`ProvisionsCustomerTenants`),
+> beam-commerce (billing roll-up), and the app (provisioning route + auth). This
+> package is a **beam / free** shell primitive (the system-tenant resolver). Folding a
+> moat concern into it would violate the beam/satellite seam (ADR-0082/0092). Multi-
+> tenancy (a site *being* multi-tenant) and brokering (reselling child tenants) are
+> orthogonal — a broker satellite need not itself be multi-tenant. Keep them apart.
 
 ## Install
 
