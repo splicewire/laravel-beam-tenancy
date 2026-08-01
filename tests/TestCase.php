@@ -1,11 +1,11 @@
 <?php
 
-namespace Splicewire\Beam\MultiTenancy\Tests;
+namespace Splicewire\Beam\Tenancy\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
-use Splicewire\Beam\MultiTenancy\BeamMultiTenancyServiceProvider;
+use Splicewire\Beam\Tenancy\BeamMultiTenancyServiceProvider;
 
 class TestCase extends Orchestra
 {

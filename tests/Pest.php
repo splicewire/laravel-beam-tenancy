@@ -1,6 +1,6 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Splicewire\Beam\MultiTenancy\Tests\TestCase;
+use Splicewire\Beam\Tenancy\Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class)->in('.');

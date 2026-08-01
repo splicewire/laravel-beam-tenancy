@@ -1,9 +1,9 @@
 <?php
 
-namespace Splicewire\Beam\MultiTenancy\Tests\Fixtures;
+namespace Splicewire\Beam\Tenancy\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
-use Splicewire\Beam\MultiTenancy\Concerns\DesignatedSystemTenant;
+use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Stancl\VirtualColumn\VirtualColumn;
 
 class TestTenant extends Model
