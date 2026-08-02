@@ -7,7 +7,7 @@ namespace Splicewire\Beam\Tenancy\Contracts;
  * tenancy analogue of issue 01's bound contracts). `CircuitTenancyBootstrapper`
  * hydrates a tenant's Conduit capability overlay on each tenant switch and resets
  * it on revert; it must do so **without naming the engine concretes**
- * (`App\Circuit\CapabilityRegistry`, `App\Conduits\ConduitHydrator`) so the
+ * (`App\Circuit\CapabilityRegistry`, `Splicewire\Tower\Conduit\ConduitHydrator`) so the
  * tenancy authority can lift into `laravel-tower-tenancy` depending DOWN, not up
  * on the engine.
  *

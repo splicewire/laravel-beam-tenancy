@@ -36,7 +36,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property array{endpoint: string, token?: string|null}|null $provisioning_webhook Broker callback for terminal provisioning status (stored in data column; see ADR-0043)
  * @property string|null $doctrine_publisher_tenant_id The single finality center this subscriber rolls its sign-offs up to; distinct from the many corpus_grants it reads (stored in data column; dealer-network B4)
  * @property array{preferred_model?: string, provider?: string, providers?: array<string, string>, models?: array<string, array<string, mixed>>, roles?: array<string, mixed>, capabilities?: array<string, string>, embedding_space?: array{provider: string, model: string, dimensions: int}}|null $llm_config Per-tenant LLM preference — a chat model or role (and optional Prism provider) that sits in the model-resolution cascade below an explicit Message/Thread/Assistant choice and above the platform default, plus an extend-only `models` catalog deep-merged onto the platform floor and a provider-keyed `roles` alias map expanded at the Tenant-hop, all in tenant context (stored in data column; see tenant-llm-pricing PRD + TLC-03/04)
- * @property array{channels?: list<array{id: string, label: string, order: int, color?: string}>}|null $calendar Per-tenant calendar config carrier — the ordered Channel registry every calendar lanes off (slice 05, ADR-0070 / big-calendar-surface PRD §2). Read through CalendarChannels (App\Composition\Calendar\CalendarChannels), which falls back to a single `'default'` channel when unset — so this being null is byte-identical to a single-lane calendar, zero migration (stored in data column)
+ * @property array{channels?: list<array{id: string, label: string, order: int, color?: string}>}|null $calendar Per-tenant calendar config carrier — the ordered Channel registry every calendar lanes off (slice 05, ADR-0070 / big-calendar-surface PRD §2). Read through CalendarChannels (Splicewire\Tower\Composition\Calendar\CalendarChannels), which falls back to a single `'default'` channel when unset — so this being null is byte-identical to a single-lane calendar, zero migration (stored in data column)
  */
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 {
@@ -364,7 +364,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * Declare this tenant's calendar Channel registry (slice 05, big-calendar-surface PRD §2.1) —
      * an ordered list of `{id, label, order, color?}` stored under `data['calendar']['channels']`.
      * One shared tenant-wide vocabulary so the aggregate calendar grid's lanes stay coherent across
-     * compositions. Passing null/[] drops the registry, and CalendarChannels (App\Composition\Calendar\CalendarChannels)
+     * compositions. Passing null/[] drops the registry, and CalendarChannels (Splicewire\Tower\Composition\Calendar\CalendarChannels)
      * then falls back to the single `'default'` seed — the zero-migration back-compat path.
      *
      * @param  list<array{id: string, label: string, order?: int, color?: string}>|null  $channels
@@ -594,7 +594,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     /**
      * Register this tenant's own billing meters (ADR-0129 model promotion) — a `{meter: {label,
-     * unit}}` map merged UNDER the platform meter floor (a flat, floor-wins merge) by MeterRegistry (App\Billing\MeterRegistry)
+     * unit}}` map merged UNDER the platform meter floor (a flat, floor-wins merge) by MeterRegistry (Splicewire\Beam\Commerce\Billing\MeterRegistry)
      * (extend-only: it can add a `{provider}.tokens` meter for a newly-adopted provider, never
      * redefine a platform meter). Promotion writes here so a promoted model is never silently
      * unmetered. Passing null/[] drops the overlay. Each entry must carry a non-empty `unit` or it
