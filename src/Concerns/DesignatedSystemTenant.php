@@ -30,7 +30,7 @@ trait DesignatedSystemTenant
      */
     public static function systemSlug(): string
     {
-        return config('beam-tenancy.system_tenant.slug', 'system');
+        return config('beam.tenancy.system_tenant.slug', 'system');
     }
 
     /**
@@ -38,7 +38,7 @@ trait DesignatedSystemTenant
      */
     public static function systemName(): string
     {
-        return config('beam-tenancy.system_tenant.name', 'System');
+        return config('beam.tenancy.system_tenant.name', 'System');
     }
 
     /**
@@ -46,7 +46,7 @@ trait DesignatedSystemTenant
      */
     public static function systemRole(): string
     {
-        return config('beam-tenancy.system_tenant.role', 'system');
+        return config('beam.tenancy.system_tenant.role', 'system');
     }
 
     /**

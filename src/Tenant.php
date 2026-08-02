@@ -149,7 +149,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     protected function statusTimelineQuery(): Builder
     {
         return CentralActivityLog::query()
-            ->where('log_name', config('beam-workflows.status_log_name', 'status'))
+            ->where('log_name', config('beam.workflows.status_log_name', 'status'))
             ->where('subject_type', $this->getMorphClass())
             ->where('subject_id', (string) $this->getKey());
     }
