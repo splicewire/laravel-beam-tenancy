@@ -65,7 +65,9 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->bootMigrations();
+        if ($this->app->runningInConsole()) {
+            $this->bootMigrations();
+        }
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;
@@ -82,28 +84,30 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the PURE-tenancy CENTRAL migrations — the substrate the whole
-     * estate FKs to: `tenants` (stancl core) + `domains`, `tenant_users`,
+     * Publish the PURE-tenancy CENTRAL migrations into the HOST — the substrate the
+     * whole estate FKs to: `tenants` (stancl core) + `domains`, `tenant_users`,
      * `tenant_invitations`, plus the tenant-row ALTERs (parent_tenant_id, stripe
      * columns, tenant_users.removed_at, domains.is_primary).
      *
-     * CENTRAL ONLY — these live on the central connection. They are deliberately
-     * NOT pushed onto the tenant `--path` (a `tenants` table inside a tenant
-     * schema would be wrong). Original timestamps are preserved so
-     * `create_tenants` (2019_09_15) still sorts first and every FK to `tenants`
-     * resolves once app + package migrations merge by basename.
+     * Publish-only via Laravel-native {@see ServiceProvider::publishesMigrations()} — the
+     * plain-provider convention (beam-workflows 994aba1). The package no longer
+     * runtime-loads: no loadMigrationsFrom. `vendor:publish
+     * --tag=beam-tenancy-migrations` drops the copies into `database/migrations/`; the
+     * host's `migrate` pass runs them.
+     *
+     * CENTRAL ONLY — these live on the central connection, so only the central dir is
+     * shipped (no tenant twin: a `tenants` table inside a tenant schema would be wrong).
+     * Timestamps ship verbatim (update_date_on_publish=false), so `create_tenants`
+     * (2019_09_15) still sorts FIRST and every FK to `tenants` — including the app-owned
+     * `tenant_syncs` (2026_06) — resolves once app + published migrations merge by
+     * basename. This is exactly why keep-timestamps is brownfield-safe.
      *
      * Federation tables (tenant_syncs + scaffold_packs cross-cut) stay app-side.
-     *
-     * Gated on `beam.tenancy.register_migrations` (default ON) so a host can opt
-     * out and own the substrate itself.
      */
     protected function bootMigrations(): void
     {
-        if (! config('beam.tenancy.register_migrations', true)) {
-            return;
-        }
-
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        $this->publishesMigrations([
+            __DIR__.'/../database/migrations' => $this->app->databasePath('migrations'),
+        ], 'beam-tenancy-migrations');
     }
 }
