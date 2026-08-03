@@ -7,6 +7,17 @@ use Illuminate\Support\ServiceProvider;
 class BeamMultiTenancyServiceProvider extends ServiceProvider
 {
     /**
+     * Back-compat aliases for the 2 Tenant* wire DTOs that moved DOWN from
+     * `Splicewire\Tower\Data\*` into this package (recohere Lane A cluster 3). A
+     * straggler safety-net: any consumer still typing the old tower FQCN keeps
+     * resolving for one release.
+     */
+    private const BACK_COMPAT_DTOS = [
+        'TenantInvitationData',
+        'TenantMemberData',
+    ];
+
+    /**
      * Register the package's configuration.
      *
      * Beam config keys use the product word, not the `splicewire` vendor
@@ -18,6 +29,15 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        foreach (self::BACK_COMPAT_DTOS as $dto) {
+            $old = 'Splicewire\\Tower\\Data\\'.$dto;
+            $new = 'Splicewire\\Beam\\Tenancy\\Data\\'.$dto;
+
+            if (! class_exists($old, false)) {
+                class_alias($new, $old);
+            }
+        }
+
         $source = __DIR__.'/../config/beam/tenancy.php';
 
         $this->mergeConfigFrom($source, 'beam.tenancy');
