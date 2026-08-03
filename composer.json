@@ -22,6 +22,7 @@
         "spatie/laravel-model-status": "*",
         "spatie/laravel-permission": "*",
         "splicewire/laravel-beam": "*",
+        "splicewire/laravel-beam-sitemap": "*",
         "stancl/tenancy": "^3.0"
     },
     "require-dev": {

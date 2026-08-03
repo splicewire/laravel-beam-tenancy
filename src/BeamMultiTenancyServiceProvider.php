@@ -3,6 +3,9 @@
 namespace Splicewire\Beam\Tenancy;
 
 use Illuminate\Support\ServiceProvider;
+use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
+use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 
 class BeamMultiTenancyServiceProvider extends ServiceProvider
 {
@@ -47,5 +50,32 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
                 $source => $this->app->configPath('beam/tenancy.php'),
             ], 'beam-tenancy-config');
         }
+    }
+
+    /**
+     * Re-bind the sitemap base-URL port to the multi-domain resolver (ADR-0166 §3).
+     * beam-sitemap binds the config-default in its own `register()`; we override it here
+     * in `boot()` (after all providers have registered) with a resolver that returns the
+     * active tenant's domain, falling back to whatever base-URL resolver was previously
+     * bound — the config-default in a normal install — when tenancy is absent.
+     *
+     * Guarded on the port interface existing, so a host that installs beam-tenancy without
+     * the beam-sitemap arm never trips this. Cross-tenant aggregation is deferred to tower
+     * (ADR-0166 §5) — not bound here.
+     */
+    public function boot(): void
+    {
+        if (! interface_exists(SitemapBaseUrlResolver::class)) {
+            return;
+        }
+
+        $this->app->singleton(SitemapBaseUrlResolver::class, function ($app) {
+            // The fallback used when tenancy is absent: the config-default. Constructed
+            // directly (not re-resolved off the container, which we are overriding) so
+            // this binding can never recurse into itself.
+            $fallback = $app->make(ConfigSitemapBaseUrlResolver::class);
+
+            return new TenantSitemapBaseUrlResolver($app, $fallback);
+        });
     }
 }
