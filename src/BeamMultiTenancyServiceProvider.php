@@ -65,6 +65,8 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->bootMigrations();
+
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;
         }
@@ -77,5 +79,31 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
 
             return new TenantSitemapBaseUrlResolver($app, $fallback);
         });
+    }
+
+    /**
+     * Register the PURE-tenancy CENTRAL migrations — the substrate the whole
+     * estate FKs to: `tenants` (stancl core) + `domains`, `tenant_users`,
+     * `tenant_invitations`, plus the tenant-row ALTERs (parent_tenant_id, stripe
+     * columns, tenant_users.removed_at, domains.is_primary).
+     *
+     * CENTRAL ONLY — these live on the central connection. They are deliberately
+     * NOT pushed onto the tenant `--path` (a `tenants` table inside a tenant
+     * schema would be wrong). Original timestamps are preserved so
+     * `create_tenants` (2019_09_15) still sorts first and every FK to `tenants`
+     * resolves once app + package migrations merge by basename.
+     *
+     * Federation tables (tenant_syncs + scaffold_packs cross-cut) stay app-side.
+     *
+     * Gated on `beam.tenancy.register_migrations` (default ON) so a host can opt
+     * out and own the substrate itself.
+     */
+    protected function bootMigrations(): void
+    {
+        if (! config('beam.tenancy.register_migrations', true)) {
+            return;
+        }
+
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
     }
 }
