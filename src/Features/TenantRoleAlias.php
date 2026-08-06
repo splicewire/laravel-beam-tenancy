@@ -17,7 +17,7 @@ use Stancl\Tenancy\Tenancy;
  * (`fast`/`reasoning`/`cheap`) as its `preferred_model`, this expands it to a concrete model at the
  * Tenant-hop, in tenant context, keyed by the tenant's *current* provider — so `reasoning` resolves
  * to *this provider's* reasoning-tier model and **re-points automatically** when the tenant swaps
- * providers, instead of stranding a frozen `gpt-4o`. Message/Chat/Assistant slots stay
+ * providers, instead of stranding a frozen `gpt-4o`. Message/Chat/Agent slots stay
  * concrete-model-only; the cascade and its loud-fail guards learn no role vocabulary — the role is
  * gone by the time `app.chat.default_model` is read.
  *

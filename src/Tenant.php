@@ -35,7 +35,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string|null $parent_tenant_id Broker tenant this is a Brokered Tenant of; null = a direct tenant (real column, self-referential; see ADR-0043)
  * @property array{endpoint: string, token?: string|null}|null $provisioning_webhook Broker callback for terminal provisioning status (stored in data column; see ADR-0043)
  * @property string|null $doctrine_publisher_tenant_id The single finality center this subscriber rolls its sign-offs up to; distinct from the many corpus_grants it reads (stored in data column; dealer-network B4)
- * @property array{preferred_model?: string, provider?: string, providers?: array<string, string>, models?: array<string, array<string, mixed>>, roles?: array<string, mixed>, capabilities?: array<string, string>, embedding_space?: array{provider: string, model: string, dimensions: int}}|null $llm_config Per-tenant LLM preference — a chat model or role (and optional Prism provider) that sits in the model-resolution cascade below an explicit Message/Thread/Assistant choice and above the platform default, plus an extend-only `models` catalog deep-merged onto the platform floor and a provider-keyed `roles` alias map expanded at the Tenant-hop, all in tenant context (stored in data column; see tenant-llm-pricing PRD + TLC-03/04)
+ * @property array{preferred_model?: string, provider?: string, providers?: array<string, string>, models?: array<string, array<string, mixed>>, roles?: array<string, mixed>, capabilities?: array<string, string>, embedding_space?: array{provider: string, model: string, dimensions: int}}|null $llm_config Per-tenant LLM preference — a chat model or role (and optional Prism provider) that sits in the model-resolution cascade below an explicit Message/Thread/Agent choice and above the platform default, plus an extend-only `models` catalog deep-merged onto the platform floor and a provider-keyed `roles` alias map expanded at the Tenant-hop, all in tenant context (stored in data column; see tenant-llm-pricing PRD + TLC-03/04)
  * @property array{channels?: list<array{id: string, label: string, order: int, color?: string}>}|null $calendar Per-tenant calendar config carrier — the ordered Channel registry every calendar lanes off (slice 05, ADR-0070 / big-calendar-surface PRD §2). Read through CalendarChannels (Splicewire\Tower\Composition\Calendar\CalendarChannels), which falls back to a single `'default'` channel when unset — so this being null is byte-identical to a single-lane calendar, zero migration (stored in data column)
  */
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
@@ -323,7 +323,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /**
      * Set this tenant's LLM config carrier (stored in the central `data` column): a
      * preferred chat model and optional Prism provider. It sits in the model-resolution
-     * cascade below an explicit Message/Thread/Assistant choice and above the platform
+     * cascade below an explicit Message/Thread/Agent choice and above the platform
      * default. Passing both nulls clears the carrier. The preferred model must be a
      * registered chat model — a typo must not silently degrade to the platform default
      * (see tenant-llm-pricing PRD).
