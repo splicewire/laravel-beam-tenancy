@@ -1,0 +1,42 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * The stancl core `tenants` table — the substrate the whole estate FKs to. Shipped as a publish-only
+ * spatie/laravel-package-tools stub (`runsMigrations` FALSE): the package publishes this timestamp-less
+ * `.php.stub` via `configurePackage()`'s `->hasMigrations([...])`, which re-stamps it to the install
+ * moment (`vendor:publish --tag=beam-tenancy-migrations` or `splicewire:beam:install`); the host runs it.
+ * beam-tenancy never loadMigrationsFrom's it.
+ *
+ * CENTRAL ONLY — no `tenant/` twin (a `tenants` table inside a tenant schema would be wrong). Every
+ * downstream FK to `tenants` — including the app-owned `tenant_syncs` table — resolves once the
+ * timestamp assigned at publish time sorts this migration ahead of theirs, exactly like any other
+ * beam-* substrate table.
+ */
+class CreateTenantsTable extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('tenants', function (Blueprint $table) {
+            $table->string('id')->primary();
+            $table->string('name');
+            $table->string('slug')->unique();
+            $table->timestamps();
+            $table->json('data')->nullable();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('tenants');
+    }
+}

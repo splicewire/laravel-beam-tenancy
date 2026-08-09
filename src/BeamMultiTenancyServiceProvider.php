@@ -2,71 +2,82 @@
 
 namespace Splicewire\Beam\Tenancy;
 
-use Illuminate\Support\ServiceProvider;
+use Spatie\LaravelPackageTools\Package;
+use Spatie\LaravelPackageTools\PackageServiceProvider;
+use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 
-class BeamMultiTenancyServiceProvider extends ServiceProvider
+/**
+ * The PURE-tenancy substrate the whole estate FKs to: `tenants` (stancl core) + `domains`,
+ * `tenant_users`, `tenant_invitations`, plus the tenant-row ALTERs (parent_tenant_id, stripe columns,
+ * tenant_users.removed_at, domains.is_primary).
+ *
+ * These ship as PUBLISH-ONLY spatie/laravel-package-tools stubs — the idiomatic pattern for a
+ * PackageServiceProvider. `runsMigrations` stays FALSE (the package-tools default), so beam-tenancy
+ * never loads them at runtime; `vendor:publish --tag=beam-tenancy-migrations` (or
+ * `splicewire:beam:install`) re-stamps + sequences timestamped copies into the HOST at install time,
+ * which runs them.
+ *
+ * CENTRAL ONLY — these live on the central connection, so only the central (flat) stub ships for each
+ * (no `tenant/` twin: a `tenants` table inside a tenant schema would be wrong). Every downstream FK to
+ * `tenants` — including the app-owned `tenant_syncs` table — resolves once the timestamp assigned at
+ * publish time sorts these ahead of it, exactly like any other beam-* substrate table (the estate's
+ * decided publish-only stub convention; no special-cased epoch-prefix workaround).
+ *
+ * Federation tables (tenant_syncs + scaffold_packs cross-cut) stay app-side.
+ */
+class BeamMultiTenancyServiceProvider extends PackageServiceProvider
 {
-    /**
-     * Back-compat aliases for the 2 Tenant* wire DTOs that moved DOWN from
-     * `Splicewire\Tower\Data\*` into this package (recohere Lane A cluster 3). A
-     * straggler safety-net: any consumer still typing the old tower FQCN keeps
-     * resolving for one release.
-     */
-    private const BACK_COMPAT_DTOS = [
-        'TenantInvitationData',
-        'TenantMemberData',
-    ];
-
-    /**
-     * Register the package's configuration.
-     *
-     * Beam config keys use the product word, not the `splicewire` vendor
-     * (ADR-0092; precedent: laravel-beam-accounts). The source ships as a nested
-     * `config/beam/tenancy.php` and is both merged and published to the
-     * same nested path in the host app, so app authors see
-     * `config/beam/tenancy.php` and reach keys at
-     * `config('beam.tenancy.*')`.
-     */
-    public function register(): void
+    public function configurePackage(Package $package): void
     {
-        foreach (self::BACK_COMPAT_DTOS as $dto) {
-            $old = 'Splicewire\\Tower\\Data\\'.$dto;
-            $new = 'Splicewire\\Beam\\Tenancy\\Data\\'.$dto;
-
-            if (! class_exists($old, false)) {
-                class_alias($new, $old);
-            }
-        }
-
-        $source = __DIR__.'/../config/beam/tenancy.php';
-
-        $this->mergeConfigFrom($source, 'beam.tenancy');
-
-        if ($this->app->runningInConsole()) {
-            $this->publishes([
-                $source => $this->app->configPath('beam/tenancy.php'),
-            ], 'beam-tenancy-config');
-        }
+        $package
+            // Beam config keys use the product word, not the `splicewire` vendor (ADR-0092;
+            // precedent: laravel-beam-accounts). The source ships as a nested `config/beam/tenancy.php`
+            // and is both merged and published to the same nested path in the host app, so app authors
+            // see `config/beam/tenancy.php` and reach keys at `config('beam.tenancy.*')`.
+            ->name('laravel-beam-tenancy')
+            ->hasConfigFile(['beam/tenancy'])
+            // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
+            // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
+            // and package-tools' generateMigrationName timestamps them in listed order.
+            ->hasMigrations([
+                'create_tenants_table',
+                'create_domains_table',
+                'create_tenant_users_table',
+                'create_tenant_invitations_table',
+                'add_removed_at_to_tenant_users_table',
+                'add_is_primary_to_domains_table',
+                'add_parent_tenant_id_to_tenants_table',
+                'add_stripe_columns_to_tenants',
+            ]);
     }
 
     /**
-     * Re-bind the sitemap base-URL port to the multi-domain resolver (ADR-0166 §3).
-     * beam-sitemap binds the config-default in its own `register()`; we override it here
-     * in `boot()` (after all providers have registered) with a resolver that returns the
-     * active tenant's domain, falling back to whatever base-URL resolver was previously
-     * bound — the config-default in a normal install — when tenancy is absent.
+     * Re-bind the sitemap base-URL port to the multi-domain resolver (ADR-0166 §3). beam-sitemap binds
+     * the config-default in its own `register()`; we override it here in `packageBooted()` (after all
+     * providers have registered) with a resolver that returns the active tenant's domain, falling back
+     * to whatever base-URL resolver was previously bound — the config-default in a normal install —
+     * when tenancy is absent.
      *
-     * Guarded on the port interface existing, so a host that installs beam-tenancy without
-     * the beam-sitemap arm never trips this. Cross-tenant aggregation is deferred to tower
-     * (ADR-0166 §5) — not bound here.
+     * Guarded on the port interface existing, so a host that installs beam-tenancy without the
+     * beam-sitemap arm never trips this. Cross-tenant aggregation is deferred to tower (ADR-0166 §5) —
+     * not bound here.
      */
-    public function boot(): void
+    public function packageBooted(): void
     {
-        if ($this->app->runningInConsole()) {
-            $this->bootMigrations();
+        $this->registerSharedMigrationsPath();
+
+        // beam-tenancy is itself an "operator" of the estate-wide publish-only stub migrations
+        // convention — self-registers the doctor/operator check on ITS OWN migrations, same as every
+        // other beam-* package registers it on theirs.
+        if ($this->app->bound(BeamDoctorManifest::class)) {
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                BeamTenancyMigrationsAudit::class,
+            );
         }
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
@@ -84,30 +95,34 @@ class BeamMultiTenancyServiceProvider extends ServiceProvider
     }
 
     /**
-     * Publish the PURE-tenancy CENTRAL migrations into the HOST — the substrate the
-     * whole estate FKs to: `tenants` (stancl core) + `domains`, `tenant_users`,
-     * `tenant_invitations`, plus the tenant-row ALTERs (parent_tenant_id, stripe
-     * columns, tenant_users.removed_at, domains.is_primary).
+     * The HOST-side half of the estate's "everything is shared by default" convention: a ubiquitous
+     * (central + every tenant) table is published by ANY beam-* package into a SINGLE destination,
+     * `database/migrations/shared/` (via that package's own `->hasMigrations(['shared/...'])` —
+     * never `loadMigrationsFrom()` on its own vendor source; every package still ALWAYS publishes).
+     * Something still has to actually RUN that directory in both migration passes — beam-tenancy, as
+     * the authoritative tenancy-substrate package, establishes that here.
      *
-     * Publish-only via Laravel-native {@see ServiceProvider::publishesMigrations()} — the
-     * plain-provider convention (beam-workflows 994aba1). The package no longer
-     * runtime-loads: no loadMigrationsFrom. `vendor:publish
-     * --tag=beam-tenancy-migrations` drops the copies into `database/migrations/`; the
-     * host's `migrate` pass runs them.
-     *
-     * CENTRAL ONLY — these live on the central connection, so only the central dir is
-     * shipped (no tenant twin: a `tenants` table inside a tenant schema would be wrong).
-     * Timestamps ship verbatim (update_date_on_publish=false), so `create_tenants`
-     * (2019_09_15) still sorts FIRST and every FK to `tenants` — including the app-owned
-     * `tenant_syncs` (2026_06) — resolves once app + published migrations merge by
-     * basename. This is exactly why keep-timestamps is brownfield-safe.
-     *
-     * Federation tables (tenant_syncs + scaffold_packs cross-cut) stay app-side.
+     * This is NOT a package auto-loading its own un-published migrations (the convention that stays
+     * forbidden — {@see BeamTenancyMigrationsAudit} still fails a package that does that). It is
+     * host-side glue over an ALREADY-published directory: registering a custom migrations path is
+     * ordinary Laravel app wiring, no different from any app declaring a second `database/migrations/`
+     * subdirectory. Laravel's own `migrate` does not recurse into subdirectories by default, so the
+     * central registration is the explicit opt-in; Stancl's `tenants:migrate` only ever runs the
+     * directories named in `tenancy.migration_parameters.--path`, so the tenant registration pushes
+     * ours on (guarded so a host that boots this provider twice — the shared-test-DB harness — does
+     * not duplicate the entry). Safe unconditionally on a single-tenant host: `loadMigrationsFrom` on
+     * an empty/missing directory is a no-op, and pushing onto an unread config key is harmless.
      */
-    protected function bootMigrations(): void
+    protected function registerSharedMigrationsPath(): void
     {
-        $this->publishesMigrations([
-            __DIR__.'/../database/migrations' => $this->app->databasePath('migrations'),
-        ], 'beam-tenancy-migrations');
+        $sharedDir = database_path('migrations/shared');
+
+        $this->loadMigrationsFrom($sharedDir);
+
+        $paths = config('tenancy.migration_parameters.--path', []);
+
+        if (! in_array($sharedDir, $paths, true)) {
+            config()->push('tenancy.migration_parameters.--path', $sharedDir);
+        }
     }
 }

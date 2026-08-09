@@ -20,6 +20,7 @@
         "laravel/cashier": "^15.0|^16.0",
         "spatie/laravel-activitylog": "^5.0",
         "spatie/laravel-model-status": "*",
+        "spatie/laravel-package-tools": "^1.16",
         "spatie/laravel-permission": "*",
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-sitemap": "*",
