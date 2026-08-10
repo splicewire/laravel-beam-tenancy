@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Schema;
  * moment via `configurePackage()`'s `->hasMigrations([...])` on `vendor:publish
  * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it. CENTRAL ONLY, same as
  * `tenants`.
+ *
+ * Squashed pre-prod (no deployed data to preserve migration history for) from the original create plus
+ * one additive ALTER: `removed_at` marks a soft-removed membership.
  */
 return new class extends Migration
 {
@@ -20,6 +23,7 @@ return new class extends Migration
             $table->string('role')->default('member'); // owner, admin, member
             $table->timestamp('invited_at')->nullable();
             $table->timestamp('accepted_at')->nullable();
+            $table->timestamp('removed_at')->nullable();
             $table->timestamps();
 
             $table->primary(['tenant_id', 'user_id']);

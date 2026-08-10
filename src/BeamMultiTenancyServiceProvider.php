@@ -12,8 +12,11 @@ use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 
 /**
  * The PURE-tenancy substrate the whole estate FKs to: `tenants` (stancl core) + `domains`,
- * `tenant_users`, `tenant_invitations`, plus the tenant-row ALTERs (parent_tenant_id, stripe columns,
- * tenant_users.removed_at, domains.is_primary).
+ * `tenant_users`, `tenant_invitations`. Each create is squashed pre-prod (no deployed data to
+ * preserve migration history for) with its own additive columns folded straight in
+ * (`tenants.parent_tenant_id`, `tenant_users.removed_at`, `domains.is_primary`) — see each stub's
+ * own docblock for what it carries. Billing identity (Cashier's Stripe columns) moved OFF `tenants`
+ * entirely to `laravel-beam-commerce`'s polymorphic `beam_billable` table.
  *
  * These ship as PUBLISH-ONLY spatie/laravel-package-tools stubs — the idiomatic pattern for a
  * PackageServiceProvider. `runsMigrations` stays FALSE (the package-tools default), so beam-tenancy
@@ -48,9 +51,6 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
                 'create_domains_table',
                 'create_tenant_users_table',
                 'create_tenant_invitations_table',
-                'add_removed_at_to_tenant_users_table',
-                'add_is_primary_to_domains_table',
-                'add_parent_tenant_id_to_tenants_table',
             ]);
     }
 

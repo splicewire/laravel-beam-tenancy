@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Schema;
  * FALSE) — re-stamped to the install moment via `configurePackage()`'s `->hasMigrations([...])` on
  * `vendor:publish --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it.
  * CENTRAL ONLY, same as `tenants`.
+ *
+ * Squashed pre-prod (no deployed data to preserve migration history for) from the original create plus
+ * one additive ALTER: `is_primary` marks a tenant's canonical domain.
  */
 class CreateDomainsTable extends Migration
 {
@@ -21,6 +24,7 @@ class CreateDomainsTable extends Migration
             $table->increments('id');
             $table->string('domain', 255)->unique();
             $table->string('tenant_id');
+            $table->boolean('is_primary')->default(false);
 
             $table->timestamps();
             $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
