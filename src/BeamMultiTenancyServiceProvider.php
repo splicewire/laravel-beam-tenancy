@@ -51,7 +51,6 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
                 'add_removed_at_to_tenant_users_table',
                 'add_is_primary_to_domains_table',
                 'add_parent_tenant_id_to_tenants_table',
-                'add_stripe_columns_to_tenants',
             ]);
     }
 

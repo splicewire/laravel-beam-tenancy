@@ -15,6 +15,16 @@ use Illuminate\Support\Facades\Schema;
  * downstream FK to `tenants` — including the app-owned `tenant_syncs` table — resolves once the
  * timestamp assigned at publish time sorts this migration ahead of theirs, exactly like any other
  * beam-* substrate table.
+ *
+ * Squashed pre-prod (no deployed data to preserve migration history for) from the original create plus
+ * one additive ALTER: `parent_tenant_id`, a self-referencing FK for broker/child tenant hierarchies.
+ *
+ * The Cashier billing columns this table used to also carry (`stripe_id`/`pm_type`/`pm_last_four`/
+ * `trial_ends_at`) are NOT squashed in — they were a commerce-tier concern (a billable party can be a
+ * Tenant OR a User) and have moved out of this tenancy-substrate package entirely, onto
+ * laravel-beam-commerce's polymorphic `beam_billable` table (`Splicewire\Beam\Commerce\BillingAccount`).
+ * A Tenant's billing account, when one exists, is reachable via `Tenant::billingAccount()` — a lazy,
+ * FQCN-string-referenced relation so this package stays commerce-agnostic.
  */
 class CreateTenantsTable extends Migration
 {
@@ -27,6 +37,12 @@ class CreateTenantsTable extends Migration
             $table->string('id')->primary();
             $table->string('name');
             $table->string('slug')->unique();
+
+            $table->string('parent_tenant_id')->nullable();
+            $table->foreign('parent_tenant_id')
+                ->references('id')->on('tenants')
+                ->nullOnDelete();
+
             $table->timestamps();
             $table->json('data')->nullable();
         });

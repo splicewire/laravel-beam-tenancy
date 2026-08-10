@@ -2,10 +2,11 @@
 
 namespace Splicewire\Beam\Tenancy;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use Laravel\Cashier\Billable;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
@@ -17,6 +18,7 @@ use Splicewire\Beam\Tenancy\Models\CentralActivityLog;
 use Splicewire\Beam\Tenancy\Models\CentralStatus;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
+use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
 use Splicewire\Beam\Workflows\Display\Status;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
@@ -40,7 +42,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  */
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 {
-    use Billable, DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatuses;
+    use DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatusChannel, HasStatuses;
 
     public $incrementing = false;
 
@@ -238,13 +240,6 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             'name',
             'slug',
             'parent_tenant_id',
-            // Cashier billing columns — real columns (see add_stripe_columns_to_tenants
-            // migration), so they must be declared here to escape stancl's `data`
-            // virtual-column folding and stay queryable by Cashier.
-            'stripe_id',
-            'pm_type',
-            'pm_last_four',
-            'trial_ends_at',
         ];
     }
 
@@ -280,7 +275,6 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     protected $casts = [
         'settings' => 'json',
-        'trial_ends_at' => 'datetime',
     ];
 
     /**
@@ -814,6 +808,21 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         return $this->name;
     }
 
+    /**
+     * This tenant's optional billing account (laravel-beam-commerce's polymorphic `BillingAccount`,
+     * `beam_billable` table). Referenced by FQCN STRING rather than a `use` import: beam-tenancy is a
+     * pure tenancy substrate that must stay commerce-agnostic and never hard-depend on
+     * laravel-beam-commerce (symmetric to beam-commerce never hard-depending on beam-tenancy — beam's
+     * multi-tenancy is optional, and some deployments bill a User directly with no Tenant at all).
+     * Eloquent relation methods are lazy, so the class string is only resolved/autoloaded when this
+     * relation is actually queried — a host without beam-commerce installed simply never calls
+     * `$tenant->billingAccount` and nothing breaks.
+     */
+    public function billingAccount(): MorphOne
+    {
+        return $this->morphOne(\Splicewire\Beam\Commerce\BillingAccount::class, 'billable');
+    }
+
     public function users()
     {
         // User is app-owned (T22): resolve the configured central user model.
@@ -860,7 +869,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * with the Admin role. Idempotent. Shared by the SyncOwner provisioning job
      * and the admin "assign owner" endpoint.
      */
-    public function assignOwner(\Illuminate\Contracts\Auth\Authenticatable $owner): void
+    public function assignOwner(Authenticatable $owner): void
     {
         $this->owner_email = $owner->email;
         $this->save();
