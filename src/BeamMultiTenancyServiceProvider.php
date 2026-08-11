@@ -5,8 +5,10 @@ namespace Splicewire\Beam\Tenancy;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
+use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 
@@ -34,6 +36,24 @@ use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
  */
 class BeamMultiTenancyServiceProvider extends PackageServiceProvider
 {
+    public function register(): void
+    {
+        parent::register();
+
+        $this->app->singleton(IsolatedDatabaseDestination::class, function ($app) {
+            $config = $app['config']->get('beam.tenancy.isolated_database', []);
+
+            return new IsolatedDatabaseDestination(
+                cloudBinary: $config['cloud_binary'] ?? 'cloud',
+                apiToken: $config['api_token'] ?? null,
+                region: $config['region'] ?? 'us-east-1',
+                clusterType: $config['cluster_type'] ?? 'neon_serverless_postgres_18',
+                extensions: $config['extensions'] ?? ['vector', 'fuzzystrmatch'],
+                cliHomeDir: $config['cli_home'] ?? storage_path('app/laravel-cloud-cli'),
+            );
+        });
+    }
+
     public function configurePackage(Package $package): void
     {
         $package
@@ -68,6 +88,19 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         $this->registerSharedMigrationsPath();
+
+        // Self-register into beam-core's install manifest (order 5: tenants/domains/users are
+        // foundational — publish early, ahead of the default-order-100 packages that FK into them)
+        // so `splicewire:beam:install` publishes this package's central + config with the rest of
+        // the stack. Recohere gap: this package predates the manifest and was never wired in.
+        if ($this->app->bound(BeamInstallManifest::class)) {
+            $this->app->make(BeamInstallManifest::class)->register(
+                package: 'splicewire/laravel-beam-tenancy',
+                publishTags: ['beam-tenancy-config', 'beam-tenancy-migrations'],
+                migrates: true,
+                order: 5,
+            );
+        }
 
         // beam-tenancy is itself an "operator" of the estate-wide publish-only stub migrations
         // convention — self-registers the doctor/operator check on ITS OWN migrations, same as every
