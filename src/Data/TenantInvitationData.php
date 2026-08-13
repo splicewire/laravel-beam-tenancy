@@ -2,16 +2,17 @@
 
 namespace Splicewire\Beam\Tenancy\Data;
 
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\Data;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
-use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
- * A pending tenant invitation as TenantInvitationController::index emits it — the
- * {@see TenantInvitation} model serialization (the index returns `->get()` directly, a bare
- * array with no `data` envelope). Every serialized column is on the wire, so the DTO declares
- * them all; the client aliases only the safe subset it reads ({id, email, role, accepted_at,
- * created_at}). `accepted_at` is nullable (a still-pending invite).
+ * A tenant invitation as TenantInvitationController emits it — the {@see TenantInvitation}
+ * model serialization, constructed live and carried in the standard `{data: …}` envelope
+ * (envelope normalization: a list on index; the acted-on invitation on send/resend/revoke).
+ * Every serialized column is on the wire, so the DTO declares them all; the client aliases only
+ * the safe subset it reads ({id, email, role, accepted_at, created_at}). `accepted_at` is
+ * nullable (a still-pending invite).
  *
  * The single-use accept `token` is NOT on this wire: it is a bearer secret and the model marks
  * it `$hidden`, so no serialization (index list or create echo) carries it. The follow-up the
