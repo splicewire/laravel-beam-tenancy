@@ -7,8 +7,12 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE) — re-stamped to the install
  * moment via `configurePackage()`'s `->hasMigrations([...])` on `vendor:publish
- * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it. CENTRAL ONLY, same as
- * `tenants`.
+ * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it.
+ *
+ * CENTRAL ONLY, same as `tenants` — and for the same reason: this pivot IS the membership half of
+ * the isolation record, answering "which tenants may this user enter" in one central join before
+ * any tenant schema boots. It spans users × tenants, so no single tenant schema could hold it, and
+ * it FKs both central substrates.
  *
  * Squashed pre-prod (no deployed data to preserve migration history for) from the original create plus
  * one additive ALTER: `removed_at` marks a soft-removed membership.

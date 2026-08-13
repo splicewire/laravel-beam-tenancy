@@ -10,6 +10,11 @@ class TenantInvitation extends Model
 {
     use HasUuids;
 
+    /**
+     * @central-floor tenant-isolation — prospective membership in the isolation record: the
+     * invite is resolved (by email/token) before the invitee has any tenant context, and it FKs
+     * the central `tenants` and `users` substrates.
+     */
     protected $connection = 'central';
 
     protected $fillable = [

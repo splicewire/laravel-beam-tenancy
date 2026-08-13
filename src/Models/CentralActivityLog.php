@@ -16,6 +16,12 @@ use Spatie\Activitylog\Models\Activity;
  */
 class CentralActivityLog extends Activity
 {
+    /**
+     * @central-floor auth — the audit trail follows its subjects, and those subjects are floor
+     * records: personal access tokens and users (auth floor) plus tenants (isolation record).
+     * The trail must survive any one tenant's churn and stay readable in one central join —
+     * a tenant-local log could not durably record the floor's own lifecycle.
+     */
     protected $connection = 'central';
 
     protected $table = 'central_activity_log';

@@ -14,6 +14,11 @@ class CentralStatus extends SpatieModelStatus
 {
     use HasUuids;
 
+    /**
+     * @central-floor tenant-isolation — the status timeline of the isolation record itself:
+     * a Tenant's provisioning steps are stamped before/while its schema is being stood up, so
+     * the timeline must live where it can be written with no tenant context initialized.
+     */
     protected $connection = 'central';
 
     protected $table = 'statuses';

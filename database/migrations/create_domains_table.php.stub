@@ -8,7 +8,11 @@ use Illuminate\Support\Facades\Schema;
  * The stancl core `domains` table. Publish-only spatie/laravel-package-tools stub (`runsMigrations`
  * FALSE) — re-stamped to the install moment via `configurePackage()`'s `->hasMigrations([...])` on
  * `vendor:publish --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it.
- * CENTRAL ONLY, same as `tenants`.
+ *
+ * CENTRAL ONLY, same as `tenants` — and for the same reason: `domains` is the routing index that
+ * resolves an incoming request TO a tenant before any tenant schema is selected. The lookup that
+ * picks the schema cannot live inside one (tenant-isolation floor); it also FKs the central
+ * `tenants` substrate, which no tenant schema can reach.
  *
  * Squashed pre-prod (no deployed data to preserve migration history for) from the original create plus
  * one additive ALTER: `is_primary` marks a tenant's canonical domain.

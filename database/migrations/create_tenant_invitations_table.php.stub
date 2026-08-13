@@ -7,8 +7,12 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE) — re-stamped to the install
  * moment via `configurePackage()`'s `->hasMigrations([...])` on `vendor:publish
- * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it. CENTRAL ONLY, same as
- * `tenants`.
+ * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it.
+ *
+ * CENTRAL ONLY, same as `tenants` — and for the same reason: an invitation is prospective
+ * membership in the isolation record. It is issued to an email before the invitee has any tenant
+ * context (the accept flow resolves the token centrally, then enters the tenant), and it FKs both
+ * central substrates — `tenants` and the central `users` — which no tenant schema can reach.
  */
 return new class extends Migration
 {
