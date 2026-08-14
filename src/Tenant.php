@@ -15,7 +15,7 @@ use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
-use Splicewire\Beam\Tenancy\Models\CentralActivityLog;
+use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
