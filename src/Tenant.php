@@ -10,7 +10,6 @@ use Illuminate\Support\Str;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
-use Splicewire\Beam\Commerce\BillingAccount;
 use Splicewire\Beam\Enums\LlmCapability;
 use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\HasStatuses;
@@ -18,6 +17,7 @@ use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\CentralActivityLog;
 use Splicewire\Beam\Tenancy\Models\CentralStatus;
+use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
@@ -51,6 +51,14 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 {
     use DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatusChannel, HasStatuses;
+
+    /**
+     * The local key {@see billingAccount()} points its null branch at. No Tenant carries this
+     * attribute, so `getParentKey()` is null and MorphOne short-circuits before running SQL —
+     * which is the mechanism the unbound seam degrades through. Named rather than inlined so the
+     * relation reads as deliberate and nothing later mistakes it for a real column.
+     */
+    private const UNBOUND_BILLING_ACCOUNT_KEY = '__unbound_billing_account';
 
     public $incrementing = false;
 
@@ -866,18 +874,33 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
-     * This tenant's optional billing account (laravel-beam-commerce's polymorphic `BillingAccount`,
-     * `beam_billable` table). Referenced by FQCN STRING rather than a `use` import: beam-tenancy is a
-     * pure tenancy substrate that must stay commerce-agnostic and never hard-depend on
-     * laravel-beam-commerce (symmetric to beam-commerce never hard-depending on beam-tenancy — beam's
-     * multi-tenancy is optional, and some deployments bill a User directly with no Tenant at all).
-     * Eloquent relation methods are lazy, so the class string is only resolved/autoloaded when this
-     * relation is actually queried — a host without beam-commerce installed simply never calls
-     * `$tenant->billingAccount` and nothing breaks.
+     * This tenant's optional billing account — the polymorphic `beam_billable` row a billing
+     * engine (in practice laravel-beam-commerce) owns.
+     *
+     * The related model is resolved through the `beam.tenancy.billing_account_model` seam rather
+     * than named here, and that indirection is structural, not stylistic: laravel-beam-commerce
+     * REQUIRES laravel-beam-tenancy, so any commerce symbol in this package — import, class
+     * constant, or FQCN string — is a dependency cycle expressed in source. The seam is the only
+     * way the relation can reach a model this package must never declare.
+     *
+     * Unbound, it degrades to no billing account WITHOUT querying: the null branch hands the
+     * relation a local key no Tenant carries, so MorphOne::getResults() takes its null-parent-key
+     * short-circuit and never emits SQL. That matters because a host with no billing engine has
+     * no `beam_billable` table — "returns nothing" has to mean "never asks". A configured class
+     * that isn't installed degrades identically rather than fataling, since the two states are
+     * indistinguishable to a caller and both mean the same thing: this deployment does not bill.
+     *
+     * @see NullBillingAccount
      */
     public function billingAccount(): MorphOne
     {
-        return $this->morphOne(BillingAccount::class, 'billable');
+        $model = config('beam.tenancy.billing_account_model');
+
+        if (! is_string($model) || ! class_exists($model)) {
+            return $this->morphOne(NullBillingAccount::class, 'billable', localKey: self::UNBOUND_BILLING_ACCOUNT_KEY);
+        }
+
+        return $this->morphOne($model, 'billable');
     }
 
     public function users()

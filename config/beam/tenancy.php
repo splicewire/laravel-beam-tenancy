@@ -19,6 +19,21 @@ return [
      */
 
     /*
+     * The model `Tenant::billingAccount()` resolves its polymorphic `beam_billable` row from —
+     * in practice `laravel-beam-commerce`'s billing-account model, which this package cannot
+     * name. beam-commerce REQUIRES beam-tenancy, so a tenancy-side reference to a commerce class
+     * closes a dependency cycle; the seam is how the relation reaches a model it must never
+     * declare. Mirrors `beam.accounts.tokens.model`.
+     *
+     * Null (the default) is a real, supported state, not an unconfigured one: multi-tenancy is
+     * optional to billing and billing is optional to multi-tenancy, so a host with no billing
+     * engine leaves this unbound and the relation degrades to no billing account. It never runs
+     * SQL in that state — see NullBillingAccount — because such a host has no `beam_billable`
+     * table to query. A class name that isn't installed degrades the same way.
+     */
+    'billing_account_model' => null,
+
+    /*
      * The Isolated Database provisioning destination (tenant-database-upsell ticket 02/04):
      * a dedicated Laravel Cloud Serverless Postgres cluster per tenant, used purely as an
      * external managed-Postgres vendor. The API token is org-scoped, not app-specific — it's
