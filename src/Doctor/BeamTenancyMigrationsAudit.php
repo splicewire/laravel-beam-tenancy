@@ -3,7 +3,7 @@
 namespace Splicewire\Beam\Tenancy\Doctor;
 
 use Splicewire\Beam\Doctor\Support\StubMigrationsAudit;
-use Splicewire\Beam\Tenancy\BeamMultiTenancyServiceProvider;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 
 class BeamTenancyMigrationsAudit extends StubMigrationsAudit
 {
@@ -14,6 +14,6 @@ class BeamTenancyMigrationsAudit extends StubMigrationsAudit
 
     protected function serviceProviderClass(): string
     {
-        return BeamMultiTenancyServiceProvider::class;
+        return BeamTenancyServiceProvider::class;
     }
 }

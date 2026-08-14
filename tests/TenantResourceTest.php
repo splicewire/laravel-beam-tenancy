@@ -6,7 +6,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Schema;
 use Rushing\Graphine\Testing\SeamGuard;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
-use Splicewire\Beam\Tenancy\BeamMultiTenancyServiceProvider;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Tenant;
 
@@ -28,7 +28,7 @@ beforeEach(function () {
 it('registers the tenants resource onto the Frame registry when beam is present', function () {
     app()->singleton(ParticleResourceRegistry::class, fn () => new ParticleResourceRegistry);
 
-    $provider = new BeamMultiTenancyServiceProvider(app());
+    $provider = new BeamTenancyServiceProvider(app());
     $provider->register();
     $provider->boot();
 
@@ -41,7 +41,7 @@ it('registers the tenants resource onto the Frame registry when beam is present'
 it('is read-only in all three directions — tenants are provisioned, never created from a form', function () {
     app()->singleton(ParticleResourceRegistry::class, fn () => new ParticleResourceRegistry);
 
-    $provider = new BeamMultiTenancyServiceProvider(app());
+    $provider = new BeamTenancyServiceProvider(app());
     $provider->register();
     $provider->boot();
 
@@ -64,7 +64,7 @@ it('is absent from the registry when the frame-resources gate is off', function 
     ]));
     $app->singleton(ParticleResourceRegistry::class, fn () => new ParticleResourceRegistry);
 
-    $provider = new BeamMultiTenancyServiceProvider($app);
+    $provider = new BeamTenancyServiceProvider($app);
     $boot = new ReflectionMethod($provider, 'bootFrameResources');
     $boot->setAccessible(true);
     $boot->invoke($provider);
@@ -81,7 +81,7 @@ it('registers nothing and does not fatal when beam\'s particle registry is absen
         'beam' => ['tenancy' => ['frame_resources' => ['enabled' => true]]],
     ]));
 
-    $provider = new BeamMultiTenancyServiceProvider($app);
+    $provider = new BeamTenancyServiceProvider($app);
     $boot = new ReflectionMethod($provider, 'bootFrameResources');
     $boot->setAccessible(true);
 
@@ -154,5 +154,5 @@ it('names no commerce symbol in the resource or its projection', function () {
     $guard = new SeamGuard(['Splicewire\Beam\Commerce']);
 
     expect($guard->scan(__DIR__.'/../src/Data/TenantData.php'))->toBe([])
-        ->and($guard->scan(__DIR__.'/../src/BeamMultiTenancyServiceProvider.php'))->toBe([]);
+        ->and($guard->scan(__DIR__.'/../src/BeamTenancyServiceProvider.php'))->toBe([]);
 });

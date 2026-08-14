@@ -38,7 +38,7 @@ use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
  *
  * Federation tables (tenant_syncs + scaffold_packs cross-cut) stay app-side.
  */
-class BeamMultiTenancyServiceProvider extends PackageServiceProvider
+class BeamTenancyServiceProvider extends PackageServiceProvider
 {
     public function register(): void
     {

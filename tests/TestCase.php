@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Tenancy\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
-use Splicewire\Beam\Tenancy\BeamMultiTenancyServiceProvider;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Tenant;
 use Stancl\Tenancy\Database\Models\Domain;
 
@@ -14,7 +14,7 @@ class TestCase extends Orchestra
     protected function getPackageProviders($app): array
     {
         return [
-            BeamMultiTenancyServiceProvider::class,
+            BeamTenancyServiceProvider::class,
         ];
     }
 

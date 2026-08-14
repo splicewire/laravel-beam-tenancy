@@ -3,10 +3,11 @@
 namespace Splicewire\Beam\Tenancy\Tests;
 
 use Illuminate\Support\Facades\Schema;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 
 /**
  * Verifies the host-side half of the "everything is shared by default" convention
- * (BeamMultiTenancyServiceProvider::registerSharedMigrationsPath): a migration sitting in
+ * (BeamTenancyServiceProvider::registerSharedMigrationsPath): a migration sitting in
  * database/migrations/shared/ actually runs via a plain `migrate`, and the same directory is pushed
  * onto Stancl's tenant `--path` array — with no package ever calling loadMigrationsFrom() on its own
  * un-published source.
@@ -71,7 +72,7 @@ class SharedMigrationsPathTest extends TestCase
 
     public function test_calling_the_registration_twice_does_not_duplicate_the_tenant_path_entry(): void
     {
-        $provider = new \Splicewire\Beam\Tenancy\BeamMultiTenancyServiceProvider($this->app);
+        $provider = new BeamTenancyServiceProvider($this->app);
 
         $method = new \ReflectionMethod($provider, 'registerSharedMigrationsPath');
         $method->invoke($provider);

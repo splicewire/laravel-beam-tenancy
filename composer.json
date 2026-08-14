@@ -62,7 +62,7 @@
         },
         "laravel": {
             "providers": [
-                "Splicewire\\Beam\\Tenancy\\BeamMultiTenancyServiceProvider"
+                "Splicewire\\Beam\\Tenancy\\BeamTenancyServiceProvider"
             ]
         },
         "package-topology": {
