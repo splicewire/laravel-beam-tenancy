@@ -19,6 +19,17 @@ return [
      */
 
     /*
+     * The packaged Frame/particle resources — today the neutral `tenants` list. On by default, so a
+     * fresh multi-tenant host can see what tenants exist without installing commerce or writing a
+     * resource. Turn it OFF in a deployment whose own richer resource owns the `tenants` key, so the
+     * two never contest it: splicewire-app does exactly that for tower's enriched variant, the same
+     * way it already turns off `beam.accounts.frame_resources.enabled`.
+     */
+    'frame_resources' => [
+        'enabled' => true,
+    ],
+
+    /*
      * The model `Tenant::billingAccount()` resolves its polymorphic `beam_billable` row from —
      * in practice `laravel-beam-commerce`'s billing-account model, which this package cannot
      * name. beam-commerce REQUIRES beam-tenancy, so a tenancy-side reference to a commerce class

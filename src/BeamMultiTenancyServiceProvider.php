@@ -6,8 +6,11 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
+use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
+use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
@@ -97,6 +100,7 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         $this->registerSharedMigrationsPath();
+        $this->bootFrameResources();
 
         // Self-register into beam-core's install manifest (order 5: tenants/domains/users are
         // foundational — publish early, ahead of the default-order-100 packages that FK into them)
@@ -154,6 +158,43 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
      * not duplicate the entry). Safe unconditionally on a single-tenant host: `loadMigrationsFrom` on
      * an empty/missing directory is a no-op, and pushing onto an unread config key is harmless.
      */
+    /**
+     * Register this package's Frame/particle resources — today just the neutral `tenants` list.
+     *
+     * Two independent off-switches, both silent. `beam.tenancy.frame_resources.enabled` (default on)
+     * is the host's: a deployment whose own richer resource owns the `tenants` key turns this one off
+     * so the two never contest it — splicewire-app does exactly that for tower's enriched variant,
+     * the same way it already turns off the packaged accounts resources. The class_exists guard is
+     * structural: a host that installs beam-tenancy without beam's particle registry has no registry
+     * to register into, and gets nothing rather than a fatal.
+     *
+     * Registration rides `afterResolving` so boot order between beam and beam-tenancy is irrelevant —
+     * the hook fires whenever the registry is first resolved, before or after this provider boots.
+     * The pattern beam-accounts' own `bootFrameResources` established.
+     */
+    protected function bootFrameResources(): void
+    {
+        if (! config('beam.tenancy.frame_resources.enabled', true)) {
+            return;
+        }
+
+        if (
+            ! class_exists(ParticleResourceRegistry::class)
+            || ! class_exists(AttributedParticleDiscovery::class)
+        ) {
+            return;
+        }
+
+        $this->app->afterResolving(
+            ParticleResourceRegistry::class,
+            function (ParticleResourceRegistry $registry): void {
+                $registry->register(
+                    AttributedParticleDiscovery::resourceFromAttribute(TenantData::class)
+                );
+            }
+        );
+    }
+
     protected function registerSharedMigrationsPath(): void
     {
         $sharedDir = database_path('migrations/shared');
