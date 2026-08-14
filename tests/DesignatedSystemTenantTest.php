@@ -22,7 +22,7 @@ it('returns null when no tenant is marked as system', function () {
 it('honors a config/env override for the slug and defaults to system', function () {
     expect(TestTenant::systemSlug())->toBe('system');
 
-    config(['beam-tenancy.system_tenant.slug' => 'hub']);
+    config(['beam.tenancy.system_tenant.slug' => 'hub']);
 
     expect(TestTenant::systemSlug())->toBe('hub');
 });
@@ -57,7 +57,7 @@ it('provisions the system tenant idempotently', function () {
 });
 
 it('resolves a custom role override', function () {
-    config(['beam-tenancy.system_tenant.role' => 'internal']);
+    config(['beam.tenancy.system_tenant.role' => 'internal']);
 
     $tenant = TestTenant::create(['id' => 'acme', 'name' => 'Acme']);
     $tenant->markAsSystem();
