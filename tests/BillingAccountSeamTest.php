@@ -79,6 +79,23 @@ it('issues no query at all when the seam is unbound', function () {
         ->and($queries)->toBe([]);
 });
 
+it('issues no query when eager loading with the seam unbound', function () {
+    // Eager loading is a SEPARATE path from the lazy read above and fails differently: it constrains
+    // on the parent keys and reaches for the table regardless of what a lazy read would do. Suppressing
+    // the query at the relation's call site only ever fixed the lazy case — this is the assertion that
+    // forces the guarantee to live in NullBillingAccount, where it covers both.
+    Schema::drop('beam_billable');
+
+    config(['beam.tenancy.billing_account_model' => null]);
+
+    Tenant::create(['id' => 'acme', 'name' => 'Acme']);
+
+    $tenants = Tenant::with('billingAccount')->get();
+
+    expect($tenants)->toHaveCount(1)
+        ->and($tenants->first()->billingAccount)->toBeNull();
+});
+
 it('degrades rather than fataling when the seam names a class that is not installed', function () {
     config(['beam.tenancy.billing_account_model' => 'Splicewire\Beam\Commerce\BillingAccount']);
 
