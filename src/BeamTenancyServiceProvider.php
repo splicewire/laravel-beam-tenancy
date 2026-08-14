@@ -10,6 +10,7 @@ use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Surgeon\AuditScanPaths;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
@@ -101,6 +102,26 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     {
         $this->registerSharedMigrationsPath();
         $this->bootFrameResources();
+
+        // Join beam-core's bypass/redundancy/house-style audit sweeps: contribute this package's HTTP
+        // surface to the boot-time AuditScanPaths seam. Guarded on the singleton being bound (a host
+        // predating the seam still boots). The sweep only ever sees what a booted provider contributes,
+        // so until now TenantMemberController — a REST survivor of the ADR-0156 fold, sitting next to a
+        // registered `members` resource — has been structurally invisible to
+        // `particle.controller-redundant`. Not clean; unexamined.
+        //
+        // The routes dir does NOT exist here and that is correct, not an oversight: this package
+        // declares controllers and the consuming host mounts them (splicewire-app's routes/tenant.php),
+        // where beam-commerce ships its own route files. `register()` documents an absent dir as fine —
+        // the audits' file walks treat it as empty — so the pair stays honest rather than pointing at
+        // some other package's routes.
+        if ($this->app->bound(AuditScanPaths::class)) {
+            $this->app->make(AuditScanPaths::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                __DIR__.'/Http',
+                dirname(__DIR__).'/routes',
+            );
+        }
 
         // Self-register into beam-core's install manifest (order 5: tenants/domains/users are
         // foundational — publish early, ahead of the default-order-100 packages that FK into them)
