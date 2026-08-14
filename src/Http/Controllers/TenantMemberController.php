@@ -5,19 +5,21 @@ namespace Splicewire\Beam\Tenancy\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Splicewire\Beam\Accounts\Data\MembershipData;
 use Splicewire\Beam\Accounts\Data\RoleOptionsData;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Http\Controller;
-use Splicewire\Beam\Tenancy\Data\TenantMemberData;
 
 class TenantMemberController extends Controller
 {
     /**
-     * The role vocabulary the team UI renders its selects from — derived from the
-     * beam-accounts {@see Role} enum, so there is no hand-authored TS list to drift
-     * (FC-11/FC-12). `assignable` = every role a member can be set to (ownership
-     * transfer included); `invitable` = the invite-context subset (owner excluded).
-     * Served in the standard `{data: …}` envelope as a typed {@see RoleOptionsData}.
+     * List member roles
+     *
+     * The role vocabulary for this deployment, so a client can render role pickers without hardcoding
+     * them.
+     *
+     * `assignable` is every role an existing member can be changed to, ownership transfer included;
+     * `invitable` is the narrower set offered when inviting someone new, which excludes owner.
      */
     public function roles()
     {
@@ -37,19 +39,24 @@ class TenantMemberController extends Controller
     }
 
     /**
-     * One member row as {@see TenantMemberData} — the user projected with their pivot role and
-     * accepted-at timestamp, the shape every verb here emits in its `data` slot.
+     * One member row as beam-accounts' {@see MembershipData} — the user projected with their pivot
+     * role and accepted-at timestamp, the shape every verb here emits in its `data` slot.
+     *
+     * This used to be a package-local `TenantMemberData` carrying the identical five fields. Two
+     * classes for one shape meant two `#[TypeScript]` emitters for it (tower's third copy already
+     * opts out of the attribute for exactly that reason), and the tenancy one was the estate's lone
+     * snake_case DTO besides. beam-accounts owns the membership projection; this reuses it.
      */
-    protected function presentMember(object $user): TenantMemberData
+    protected function presentMember(object $user): MembershipData
     {
         $joinedAt = $user->pivot->accepted_at;
 
-        return new TenantMemberData(
+        return new MembershipData(
             id: (string) $user->id,
+            name: $user->name,
             email: $user->email,
             role: $user->pivot->role,
-            name: $user->name,
-            joined_at: $joinedAt instanceof \DateTimeInterface ? $joinedAt->toIso8601String() : $joinedAt,
+            joinedAt: $joinedAt instanceof \DateTimeInterface ? $joinedAt->toIso8601String() : $joinedAt,
         );
     }
 
