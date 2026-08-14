@@ -1,6 +1,6 @@
 {
     "name": "splicewire/laravel-beam-tenancy",
-    "description": "Resolves a stancl multi-tenant app's one designated system tenant by a configurable slug + role marker.",
+    "description": "The multi-tenancy substrate of the beam stack: the central Tenant model, seat and invitation primitives, Postgres schema-per-tenant storage, tenancy bootstrappers, and the designated system-tenant resolver.",
     "type": "library",
     "license": "MIT",
     "replace": {
