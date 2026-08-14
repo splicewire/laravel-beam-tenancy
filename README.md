@@ -15,7 +15,9 @@ carries the **designated system tenant** resolver it started life as.
   isolated-database state, and the ADR-0043 `parent_tenant_id` broker pointer. Most of these ride
   stancl's `data` JSON column via VirtualColumn.
 - **Seats and invitations** — `TenantUser`, `TenantInvitation`, their `Data` projections, and a
-  member controller. `CentralActivityLog` / `CentralStatus` for central-side records.
+  member controller. `CentralActivityLog` for the central-connection audit trail (the status
+  timeline reads off it). The spatie status model is NOT named here — it is the host's, via
+  `model-status.status_model`.
 - **Storage** — `HybridPostgresTenantDatabaseManager` and `PostgreSQLSchemaManager` for
   shared-cluster schema-per-tenant, plus provisioning destinations for an Isolated Database on
   Laravel Cloud or a customer-supplied host.

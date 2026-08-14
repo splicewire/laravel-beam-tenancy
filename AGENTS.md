@@ -12,7 +12,9 @@ What it carries today:
   run id, owner email, plan slug and scaffold packs, suspension, synthetic marker, isolated-database
   state, and the ADR-0043 `parent_tenant_id` broker pointer. Most of these ride the `data` column.
 - **Seat + invite primitives** — `TenantUser`, `TenantInvitation`, their `Data` projections, and the
-  member controller. `CentralActivityLog` / `CentralStatus` for central-side records.
+  member controller. `CentralActivityLog` for the central-connection audit trail (the status
+  timeline reads off it). The spatie status model is NOT named here — it is the host's, via
+  `model-status.status_model`.
 - **Storage** — `HybridPostgresTenantDatabaseManager` and `PostgreSQLSchemaManager` (shared-cluster
   schema-per-tenant), plus `Destinations/*` for an Isolated Database on Laravel Cloud or a
   customer-supplied host.

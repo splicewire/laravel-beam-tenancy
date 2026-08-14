@@ -16,7 +16,6 @@ use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\CentralActivityLog;
-use Splicewire\Beam\Tenancy\Models\CentralStatus;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
@@ -55,15 +54,6 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public $incrementing = false;
 
     protected $keyType = 'string';
-
-    /**
-     * Resolve the status timeline against the central connection so provisioning
-     * statuses are written centrally even when a tenant context is initialized.
-     */
-    protected function getStatusModelClassName(): string
-    {
-        return CentralStatus::class;
-    }
 
     /**
      * Mint a fresh run id so every Display status event of this attempt (provisioning or pack-apply)
@@ -142,7 +132,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /**
      * The tenant's ADR-0098 Display status timeline — central-scoped so it is readable outside any
      * tenant boundary — oldest-first. `id` breaks same-instant ties from a fast synchronous
-     * provisioning pipeline (the legacy CentralStatus used microsecond precision for the same reason).
+     * provisioning pipeline (the retired spatie-status timeline used microsecond timestamps for the
+     * same reason; this one orders on the activity log's own key instead).
      *
      * @return Collection<int, CentralActivityLog>
      */
