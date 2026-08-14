@@ -17,4 +17,28 @@ return [
      * `register_migrations` knob — a host that owns the substrate itself simply
      * doesn't publish the tag.
      */
+
+    /*
+     * The Isolated Database provisioning destination (tenant-database-upsell ticket 02/04):
+     * a dedicated Laravel Cloud Serverless Postgres cluster per tenant, used purely as an
+     * external managed-Postgres vendor. The API token is org-scoped, not app-specific — it's
+     * shared with `rushing/splicewire-beam-runbook`'s laravel-cloud-provisioning app-deploy
+     * pilot (ticket 05's decision; revisit splitting into a dedicated token before production).
+     */
+    'isolated_database' => [
+        'cloud_binary' => env('LARAVEL_CLOUD_CLI_BIN', 'cloud'),
+        // Live migration's data-copy step (ticket 04) shells out to these directly — not on
+        // PATH on every box (this dev machine only ships `psql` on PATH via Herd).
+        'pg_dump_bin' => env('PG_DUMP_BIN', 'pg_dump'),
+        'psql_bin' => env('PSQL_BIN', 'psql'),
+        'api_token' => env('LARAVEL_CLOUD_API_TOKEN'),
+        'region' => env('LARAVEL_CLOUD_DB_REGION', 'us-east-1'),
+        'cluster_type' => env('LARAVEL_CLOUD_DB_TYPE', 'neon_serverless_postgres_18'),
+        // Extensions today's schema tenants borrow from `public` via search_path (ticket 01's
+        // finding) that a fresh isolated database needs installed directly.
+        'extensions' => ['vector', 'fuzzystrmatch'],
+        // A dedicated HOME so the CLI's own config-file auth (its only auth path) never
+        // touches a real developer's `~/.config/cloud/config.json`.
+        'cli_home' => storage_path('app/laravel-cloud-cli'),
+    ],
 ];

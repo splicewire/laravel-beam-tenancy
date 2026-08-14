@@ -10,10 +10,12 @@ use Illuminate\Support\Str;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
+use Splicewire\Beam\Commerce\BillingAccount;
 use Splicewire\Beam\Enums\LlmCapability;
 use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
+use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\CentralActivityLog;
 use Splicewire\Beam\Tenancy\Models\CentralStatus;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
@@ -34,6 +36,12 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string|null $plan_slug Subscription plan slug (stored in data column)
  * @property string|null $suspended_at Suspension timestamp; null = active (stored in data column, orthogonal to provisioning_status)
  * @property bool|null $synthetic Whether this is a Synthetic Tenant — generated, not organically accrued (stored in data column; see ADR-0026)
+ * @property bool|null $isolated_database Whether this tenant's Postgres storage is an Isolated Database (a dedicated Laravel Cloud cluster) rather than the default shared-cluster schema (stored in data column; tenant-database-upsell ticket 02 — deliberately not named "tier", a technical storage spec distinct from Plan/Entitlement billing vocabulary)
+ * @property string|null $isolated_database_cluster_id The provisioning-destination identifier backing this tenant's Isolated Database, once provisioned — a Laravel Cloud cluster id, or a customer-supplied host:port/database string (stored in data column; tenant-database-upsell ticket 04, generalized ticket 13)
+ * @property string|null $isolated_database_destination Which {@see ProvisioningDestination} provisioned this tenant's Isolated Database: `'laravel_cloud'` or `'customer_supplied'` (stored in data column; tenant-database-upsell ticket 13 — recorded explicitly rather than inferred, since destination-specific behavior like teardown can't safely stay guessed). Null/unset defaults to `'laravel_cloud'` for tenants that predate this marker.
+ * @property string|null $isolated_database_requested_at Timestamp a tenant Owner/Admin requested the upgrade to Isolated Database — presence marks a pending, not-yet-actioned request (stored in data column; tenant-database-upsell ticket 03)
+ * @property string|null $write_blocked_at Timestamp writes were blocked for a live isolated-database migration's data-copy phase; null once unblocked (stored in data column; tenant-database-upsell ticket 03/04)
+ * @property string|null $retired_schema_name The old shared-cluster schema name retained past an isolated-database cutover for the rollback window; null once retired/dropped (stored in data column; tenant-database-upsell ticket 03/04)
  * @property string|null $parent_tenant_id Broker tenant this is a Brokered Tenant of; null = a direct tenant (real column, self-referential; see ADR-0043)
  * @property array{endpoint: string, token?: string|null}|null $provisioning_webhook Broker callback for terminal provisioning status (stored in data column; see ADR-0043)
  * @property string|null $doctrine_publisher_tenant_id The single finality center this subscriber rolls its sign-offs up to; distinct from the many corpus_grants it reads (stored in data column; dealer-network B4)
@@ -275,6 +283,12 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     protected $casts = [
         'settings' => 'json',
+        // Isolated Database credentials (tenant-database-upsell ticket 10): encrypted per-key
+        // inside stancl's shared `data` JSON blob via VirtualColumn's cast-aware encode/decode —
+        // no schema change, no effect on other data->* keys or their SQL-path queries.
+        'tenancy_db_host' => 'encrypted',
+        'tenancy_db_username' => 'encrypted',
+        'tenancy_db_password' => 'encrypted',
     ];
 
     /**
@@ -299,6 +313,49 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public function scopeSynthetic(Builder $query): void
     {
         $query->where('data->synthetic', true);
+    }
+
+    /**
+     * Mark this tenant's storage as an Isolated Database (a dedicated Laravel Cloud
+     * Postgres cluster) rather than the default shared-cluster schema. Set once the
+     * destination is provisioned and the atomic cutover flip lands (tenant-database-
+     * upsell ticket 03) — never before, since by construction there must be no window
+     * where neither destination is authoritative.
+     */
+    public function markIsolatedDatabase(bool $isolated = true): self
+    {
+        $this->isolated_database = $isolated;
+
+        return $this;
+    }
+
+    public function isIsolatedDatabase(): bool
+    {
+        return (bool) $this->isolated_database;
+    }
+
+    /**
+     * Record which {@see ProvisioningDestination}
+     * provisioned this tenant's Isolated Database (ticket 13, point 2) — set together with
+     * {@see markIsolatedDatabase()} at cutover, never guessed from other signals afterward.
+     */
+    public function markIsolatedDatabaseDestination(string $destination): self
+    {
+        $this->isolated_database_destination = $destination;
+
+        return $this;
+    }
+
+    /** Which destination backs this tenant's Isolated Database; defaults to `laravel_cloud` for tenants that predate the marker. */
+    public function isolatedDatabaseDestination(): string
+    {
+        return $this->isolated_database_destination ?? 'laravel_cloud';
+    }
+
+    /** True while a tenant-facing upgrade request is pending operator action (ticket 03). */
+    public function hasPendingIsolatedDatabaseRequest(): bool
+    {
+        return $this->isolated_database_requested_at !== null;
     }
 
     /**
@@ -820,7 +877,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      */
     public function billingAccount(): MorphOne
     {
-        return $this->morphOne(\Splicewire\Beam\Commerce\BillingAccount::class, 'billable');
+        return $this->morphOne(BillingAccount::class, 'billable');
     }
 
     public function users()

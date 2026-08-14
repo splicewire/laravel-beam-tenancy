@@ -8,6 +8,7 @@ use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
@@ -50,6 +51,14 @@ class BeamMultiTenancyServiceProvider extends PackageServiceProvider
                 clusterType: $config['cluster_type'] ?? 'neon_serverless_postgres_18',
                 extensions: $config['extensions'] ?? ['vector', 'fuzzystrmatch'],
                 cliHomeDir: $config['cli_home'] ?? storage_path('app/laravel-cloud-cli'),
+            );
+        });
+
+        $this->app->singleton(CustomerSuppliedDatabaseDestination::class, function ($app) {
+            $config = $app['config']->get('beam.tenancy.isolated_database', []);
+
+            return new CustomerSuppliedDatabaseDestination(
+                extensions: $config['extensions'] ?? ['vector', 'fuzzystrmatch'],
             );
         });
     }

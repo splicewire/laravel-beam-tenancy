@@ -33,18 +33,24 @@ class CreateTenantsTable extends Migration
      */
     public function up(): void
     {
+        // The self-referencing parent_tenant_id FK is added via a separate Schema::table() call below,
+        // not inline here — Postgres can reject an inline self-reference in the same Schema::create()
+        // with "no unique constraint matching given keys for referenced table tenants", since the
+        // primary key isn't guaranteed visible to the FK clause within one compiled statement. Adding
+        // it after the table (and its primary key) already exists is the standard, reliable pattern.
         Schema::create('tenants', function (Blueprint $table) {
             $table->string('id')->primary();
             $table->string('name');
             $table->string('slug')->unique();
-
             $table->string('parent_tenant_id')->nullable();
+            $table->timestamps();
+            $table->json('data')->nullable();
+        });
+
+        Schema::table('tenants', function (Blueprint $table) {
             $table->foreign('parent_tenant_id')
                 ->references('id')->on('tenants')
                 ->nullOnDelete();
-
-            $table->timestamps();
-            $table->json('data')->nullable();
         });
     }
 
