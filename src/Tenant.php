@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
-use Splicewire\Beam\Enums\LlmCapability;
+use Splicewire\Beam\Enums\LlmTask;
 use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
@@ -693,7 +693,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /**
      * Steer distinct LLM capabilities (title, quick_prompt, extraction, …) to different models
      * (TLC-05). Stored under `llm_config['capabilities']` as a `{capability: model|role}` map:
-     * each key must be a valid {@see LlmCapability} value; each value a non-empty string — a
+     * each key must be a valid {@see LlmTask} value; each value a non-empty string — a
      * concrete model OR a provider-portable role in {@see LLM_ROLES}. An unset capability degrades
      * to the `chat` entry, then to the platform default (resolved at {@see ThreadService::defaultModel()}).
      * Passing null/[] drops the map. Structural validation is loud here; the "resolves to a real
@@ -713,8 +713,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         }
 
         foreach ($map as $capability => $model) {
-            if (! is_string($capability) || LlmCapability::tryFrom($capability) === null) {
-                throw new \InvalidArgumentException("Unknown LLM capability [{$capability}] — capabilities are: ".implode(', ', array_column(LlmCapability::cases(), 'value')).'.');
+            if (! is_string($capability) || LlmTask::tryFrom($capability) === null) {
+                throw new \InvalidArgumentException("Unknown LLM capability [{$capability}] — capabilities are: ".implode(', ', array_column(LlmTask::cases(), 'value')).'.');
             }
             if (! is_string($model) || $model === '') {
                 throw new \InvalidArgumentException("Capability [{$capability}] must map to a non-empty model or role name.");
