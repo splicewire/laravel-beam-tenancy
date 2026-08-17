@@ -12,10 +12,10 @@ use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Enums\LlmTask;
 use Splicewire\Beam\Enums\Modality;
+use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
-use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
@@ -680,12 +680,26 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
         $provider = $entry['provider'] ?? null;
 
-        // ProvidesChatCompletions is a tower-owned contract (T21) — late-bind by string
-        // so beam-tenancy needn't import upward. The host binds a real implementation.
-        if (! is_string($provider) || ! class_exists($provider)
-            || ! is_a($provider, 'App\\Contracts\\ProvidesChatCompletions', true)) {
+        if (! is_string($provider) || ! class_exists($provider)) {
             throw new \InvalidArgumentException(
-                "Tenant model catalog entry [{$key}] must name a `provider` implementing ProvidesChatCompletions."
+                "Tenant model catalog entry [{$key}] must name a `provider` class that exists."
+            );
+        }
+
+        // The completions contract is owned upward (tower's ProvidesChatCompletions) — late-bind by
+        // string so beam-tenancy needn't import it, and read the FQN from config so a relocation is a
+        // config edit rather than a dead guard. It WAS hardcoded to `App\Contracts\...`, which stopped
+        // existing when the contract moved into tower: class_exists() went false, so every catalog
+        // entry failed this check and no tenant could name a model at all.
+        //
+        // A contract class that isn't installed means there is nothing to check against — the
+        // provider-exists check above still stands, but the interface half is skipped rather than
+        // failing everything, which is the failure mode this replaces.
+        $contract = config('beam.tenancy.model_provider_contract');
+
+        if (is_string($contract) && $contract !== '' && interface_exists($contract) && ! is_a($provider, $contract, true)) {
+            throw new \InvalidArgumentException(
+                "Tenant model catalog entry [{$key}] must name a `provider` implementing ".class_basename($contract).'.'
             );
         }
     }

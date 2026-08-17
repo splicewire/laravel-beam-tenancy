@@ -45,6 +45,22 @@ return [
     'billing_account_model' => null,
 
     /*
+     * The contract a tenant model-catalog entry's `provider` must implement to be offered as a
+     * usable model (see `Tenant::assertUsableModelEntry()`). Owned upward — today tower's
+     * `ProvidesChatCompletions` — so it is named by STRING here rather than imported: a default
+     * value is not a dependency, and beam-tenancy still requires nothing from tower.
+     *
+     * This is a seam because the FQN moves. It was previously hardcoded to
+     * `App\Contracts\ProvidesChatCompletions`; when the contract moved into tower, `class_exists()`
+     * went false and the guard rejected EVERY catalog entry instead of validating them. A config key
+     * makes the next relocation a one-line edit in a host that has already moved.
+     *
+     * When the named interface isn't installed at all, the guard skips the interface check (there is
+     * nothing to check against) but still requires `provider` to name a class that exists.
+     */
+    'model_provider_contract' => 'Splicewire\\Tower\\Contracts\\ProvidesChatCompletions',
+
+    /*
      * The Isolated Database provisioning destination (tenant-database-upsell ticket 02/04):
      * a dedicated Laravel Cloud Serverless Postgres cluster per tenant, used purely as an
      * external managed-Postgres vendor. The API token is org-scoped, not app-specific — it's
