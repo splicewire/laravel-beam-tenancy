@@ -4,7 +4,7 @@ namespace Splicewire\Beam\Tenancy\Testing;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use Spatie\Permission\Models\Role;
+use Spatie\Permission\Models\Role as SpatieRole;
 use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
 use Splicewire\Beam\Tenancy\Features\TenantModelCatalog;
 use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
@@ -204,7 +204,18 @@ trait InteractsWithTenancy
             ['name' => 'Root', 'password' => bcrypt('password')],
         );
 
-        Role::firstOrCreate(['name' => 'Root', 'guard_name' => 'web']);
+        // Resolve the role class through spatie's config binding rather than naming
+        // `Spatie\Permission\Models\Role` directly. `laravel-beam-accounts`' shared
+        // `create_permission_tables` migration declares `roles.id` as **uuid** (the cross-host
+        // morph-key convention), and spatie's stock model assumes an auto-incrementing integer PK —
+        // it generates no identifier, so a direct `SpatieRole::firstOrCreate()` dies on
+        // `null value in column "id" of relation "roles" violates not-null constraint`.
+        // Hosts bind a `HasUuids` subclass at `permission.models.role` (e.g.
+        // `Splicewire\Tower\Models\Role`); this is the same idiom `TeamProvisioner::syncSpatieRole()`
+        // already uses. The SpatieRole fallback keeps bigint-keyed harnesses working unchanged.
+        $roleClass = config('permission.models.role') ?: SpatieRole::class;
+
+        $roleClass::firstOrCreate(['name' => 'Root', 'guard_name' => 'web']);
 
         if (! $user->hasRole('Root')) {
             $user->assignRole('Root');
