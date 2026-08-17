@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Tenancy;
 
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
+use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseTrustStore;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
@@ -23,6 +24,12 @@ use Stancl\Tenancy\Contracts\TenantWithDatabase;
  *
  * Registered as the single `pgsql` entry in `config/tenancy.php`, replacing the bare
  * `PostgreSQLSchemaManager` registration.
+ *
+ * Three-way as of tenant-database-upsell ticket 16: `laravel_cloud` (frozen — entreport only,
+ * retired for new provisioning), `gcp_cloud_sql` (the new managed default), and
+ * `customer_supplied` (unchanged). `$laravelCloud` stays a constructor dependency purely for
+ * {@see destinationFor()}'s teardown routing on tenants already marked `laravel_cloud` — no
+ * code path here provisions a NEW tenant onto it anymore.
  */
 class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
 {
@@ -32,6 +39,7 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
         protected PostgreSQLSchemaManager $schemaManager,
         protected IsolatedDatabaseDestination $laravelCloud,
         protected CustomerSuppliedDatabaseDestination $customerSupplied,
+        protected GcpCloudSqlDestination $gcpCloudSql,
     ) {}
 
     public function setConnection(string $connection): void
@@ -41,12 +49,16 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
     }
 
     /**
-     * Net-new isolated-at-creation-time provisioning. Laravel Cloud only — ticket 08
-     * deliberately shipped no creation-time destination picker, so a `customer_supplied`
-     * tenant only ever arrives via the live-migration job (which calls its destination
-     * directly, bypassing this manager entirely — see `MigrateTenantToIsolatedDatabase`'s
-     * own docblock). Reaching this branch for a `customer_supplied` tenant would mean that
-     * assumption broke; fail loud rather than guess at unstaged connection params.
+     * Net-new isolated-at-creation-time provisioning. `gcp_cloud_sql` only, as of ticket 16 —
+     * `laravel_cloud` is retired for new provisioning fleet-wide (see this class's own
+     * docblock); `isolatedDatabaseDestination()`'s `'laravel_cloud'` fallback exists for
+     * ALREADY-provisioned tenants that predate the marker, not as a live creation-time choice,
+     * so it is deliberately never consulted here. `customer_supplied` stays unsupported at
+     * creation time (ticket 08 shipped no creation-time destination picker; that tenant only
+     * ever arrives via the live-migration job, which calls its destination directly, bypassing
+     * this manager entirely — see `MigrateTenantToIsolatedDatabase`'s own docblock). Reaching
+     * this branch for a `customer_supplied` tenant would mean that assumption broke; fail loud
+     * rather than guess at unstaged connection params.
      */
     public function createDatabase(TenantWithDatabase $tenant): bool
     {
@@ -61,10 +73,11 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
             );
         }
 
-        $result = $this->laravelCloud->provision(['name' => $this->clusterName($tenant)]);
-        $this->laravelCloud->installExtensions($result['connection'], $result['database']);
+        $result = $this->gcpCloudSql->provision(['name' => $this->clusterName($tenant)]);
+        $this->gcpCloudSql->installExtensions($result['connection'], $result['database']);
 
         $tenant->isolated_database_cluster_id = $result['identifier'];
+        $tenant->markIsolatedDatabaseDestination('gcp_cloud_sql');
         $tenant->setInternal('db_host', $result['connection']['hostname']);
         $tenant->setInternal('db_port', (string) $result['connection']['port']);
         $tenant->setInternal('db_username', $result['connection']['username']);
@@ -96,15 +109,19 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
     /**
      * Route to the destination that actually provisioned this tenant (ticket 08, point 2:
      * the explicit marker is what lets teardown — and anything else that needs to branch —
-     * route correctly without guessing). Defaults to Laravel Cloud for tenants that predate
-     * the marker (e.g. entreport's pilot, cut over before this ticket).
+     * route correctly without guessing). Three-way as of ticket 16. Defaults to Laravel Cloud
+     * for tenants that predate the marker (e.g. entreport's pilot, cut over before ticket 13) —
+     * that fallback is a real, correct identification of an old tenant, never a live choice for
+     * a new one (see {@see createDatabase()}'s own docblock).
      */
     protected function destinationFor(TenantWithDatabase $tenant): ProvisioningDestination
     {
         /** @var Tenant $tenant */
-        return $tenant->isolatedDatabaseDestination() === 'customer_supplied'
-            ? $this->customerSupplied
-            : $this->laravelCloud;
+        return match ($tenant->isolatedDatabaseDestination()) {
+            'customer_supplied' => $this->customerSupplied,
+            'gcp_cloud_sql' => $this->gcpCloudSql,
+            default => $this->laravelCloud,
+        };
     }
 
     /**

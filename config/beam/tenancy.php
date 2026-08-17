@@ -83,4 +83,42 @@ return [
         // touches a real developer's `~/.config/cloud/config.json`.
         'cli_home' => storage_path('app/laravel-cloud-cli'),
     ],
+
+    /*
+     * The replacement managed provisioning destination (tenant-database-upsell ticket 16):
+     * Laravel Cloud is retired for new provisioning (`isolated_database` above stays frozen,
+     * entreport only) — a public-IP, Authorized-Networks-allowlisted GCP Cloud SQL instance
+     * is the new default. Driven through laravel-beam-provision's real TofuApplyDispatcher
+     * apply pipeline, with a keyless Workload Identity Federation credential (no static GCP
+     * key anywhere — see GcpCloudSqlDestination's own docblock).
+     */
+    'gcp_cloud_sql' => [
+        'project' => env('GCP_PROJECT', 'splicewire'),
+        'region' => env('GCP_REGION', 'us-central1'),
+
+        // The SA GcpCloudSqlDestination impersonates via Workload Identity Federation — must
+        // grant the WIF principal `roles/iam.serviceAccountTokenCreator` (ticket 16 task 5).
+        // Reuses the SAME `beam-provision` SA the sibling CloudRunDestination already
+        // impersonates (gcp-cloud-run-provisioning ticket 02) — one identity, least-privilege
+        // roles for both consumers, not a second SA to provision and track.
+        'service_account_email' => env('GCP_BEAM_PROVISION_SERVICE_ACCOUNT', 'beam-provision@splicewire.iam.gserviceaccount.com'),
+
+        // The full Workload Identity Federation provider resource name
+        // (//iam.googleapis.com/projects/{num}/locations/global/workloadIdentityPools/{pool}/providers/{provider}) —
+        // null until ticket 16 tasks 3/4 actually provision the pool (blocked on splicewire-app
+        // going live on a real public domain the provider's issuer check can reach).
+        'workload_identity_provider' => env('GCP_WORKLOAD_IDENTITY_PROVIDER'),
+
+        // Cloud SQL's Authorized Networks IP allowlist — the network-boundary replacement for
+        // private-IP isolation (ticket 09's flagged gap: Laravel Cloud had no IP-allowlist
+        // option at any tier; this is a strictly stronger posture). Empty by default —
+        // reachable from nowhere until an entry is added, never open-by-default. JSON-encoded
+        // list of {name, cidr} via env, e.g. '[{"name":"plesk2","cidr":"203.0.113.5/32"}]'.
+        'authorized_networks' => json_decode((string) env('GCP_CLOUD_SQL_AUTHORIZED_NETWORKS', '[]'), true) ?: [],
+
+        // Same extension list every destination installs (ticket 01's finding) — kept
+        // independently configurable per destination rather than shared with
+        // `isolated_database` above, matching that block's own precedent.
+        'extensions' => ['vector', 'fuzzystrmatch'],
+    ],
 ];

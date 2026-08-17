@@ -2,17 +2,25 @@
 
 namespace Splicewire\Beam\Tenancy;
 
+use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
+use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
+use Splicewire\Beam\Provision\Gcp\WorkloadIdentityCredentialResolver;
+use Splicewire\Beam\Provision\Tofu\CabTokenMinter;
+use Splicewire\Beam\Provision\Tofu\TenantDatabaseRootConfigRenderer;
+use Splicewire\Beam\Provision\Tofu\TofuApplyDispatcher;
+use Splicewire\Beam\Provision\Tofu\TofuModulesPath;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
+use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
@@ -63,6 +71,36 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
 
             return new CustomerSuppliedDatabaseDestination(
                 extensions: $config['extensions'] ?? ['vector', 'fuzzystrmatch'],
+            );
+        });
+
+        $this->app->singleton(GcpCloudSqlDestination::class, function ($app) {
+            $config = $app['config']->get('beam.tenancy.gcp_cloud_sql', []);
+            $modulesDir = TofuModulesPath::dir();
+            $beamProvisionConfig = $app['config']->get('beam-provision', []);
+
+            $tofu = new TofuApplyDispatcher(
+                runner: new NullRunner,
+                tokenMinter: new CabTokenMinter,
+                stateBucket: $beamProvisionConfig['state_bucket'] ?? 'splicewire-beam-tofu-state',
+                modulesDir: $modulesDir,
+                pluginCacheDir: $beamProvisionConfig['plugin_cache_dir'] ?? null,
+                wallMs: $beamProvisionConfig['apply_wall_ms'] ?? 900_000,
+            );
+
+            return new GcpCloudSqlDestination(
+                project: $config['project'] ?? 'splicewire',
+                region: $config['region'] ?? 'us-central1',
+                serviceAccountEmail: $config['service_account_email'] ?? 'beam-provision@splicewire.iam.gserviceaccount.com',
+                workloadIdentityProvider: $config['workload_identity_provider'] ?? '',
+                modulesDir: $modulesDir,
+                rootConfigsRoot: $beamProvisionConfig['root_configs_root'] ?? sys_get_temp_dir().'/beam-tofu-root-configs',
+                extensions: $config['extensions'] ?? ['vector', 'fuzzystrmatch'],
+                authorizedNetworks: $config['authorized_networks'] ?? [],
+                identityTokenMinter: $app->make(IdentityTokenMinter::class),
+                credentialResolver: new WorkloadIdentityCredentialResolver,
+                renderer: new TenantDatabaseRootConfigRenderer($modulesDir),
+                tofu: $tofu,
             );
         });
     }

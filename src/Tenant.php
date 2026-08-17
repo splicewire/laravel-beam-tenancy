@@ -37,7 +37,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property bool|null $synthetic Whether this is a Synthetic Tenant — generated, not organically accrued (stored in data column; see ADR-0026)
  * @property bool|null $isolated_database Whether this tenant's Postgres storage is an Isolated Database (a dedicated Laravel Cloud cluster) rather than the default shared-cluster schema (stored in data column; tenant-database-upsell ticket 02 — deliberately not named "tier", a technical storage spec distinct from Plan/Entitlement billing vocabulary)
  * @property string|null $isolated_database_cluster_id The provisioning-destination identifier backing this tenant's Isolated Database, once provisioned — a Laravel Cloud cluster id, or a customer-supplied host:port/database string (stored in data column; tenant-database-upsell ticket 04, generalized ticket 13)
- * @property string|null $isolated_database_destination Which {@see ProvisioningDestination} provisioned this tenant's Isolated Database: `'laravel_cloud'` or `'customer_supplied'` (stored in data column; tenant-database-upsell ticket 13 — recorded explicitly rather than inferred, since destination-specific behavior like teardown can't safely stay guessed). Null/unset defaults to `'laravel_cloud'` for tenants that predate this marker.
+ * @property string|null $isolated_database_destination Which {@see ProvisioningDestination} provisioned this tenant's Isolated Database: `'laravel_cloud'` (frozen, retired for new provisioning — ticket 16), `'gcp_cloud_sql'` (the new managed default — ticket 16), or `'customer_supplied'` (stored in data column; tenant-database-upsell ticket 13 — recorded explicitly rather than inferred, since destination-specific behavior like teardown can't safely stay guessed). Null/unset defaults to `'laravel_cloud'` for tenants that predate this marker (never a live choice for a new tenant).
  * @property string|null $isolated_database_requested_at Timestamp a tenant Owner/Admin requested the upgrade to Isolated Database — presence marks a pending, not-yet-actioned request (stored in data column; tenant-database-upsell ticket 03)
  * @property string|null $write_blocked_at Timestamp writes were blocked for a live isolated-database migration's data-copy phase; null once unblocked (stored in data column; tenant-database-upsell ticket 03/04)
  * @property string|null $retired_schema_name The old shared-cluster schema name retained past an isolated-database cutover for the rollback window; null once retired/dropped (stored in data column; tenant-database-upsell ticket 03/04)
@@ -337,7 +337,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         return $this;
     }
 
-    /** Which destination backs this tenant's Isolated Database; defaults to `laravel_cloud` for tenants that predate the marker. */
+    /** Which destination backs this tenant's Isolated Database (`laravel_cloud`/`gcp_cloud_sql`/`customer_supplied`); defaults to `laravel_cloud` for tenants that predate the marker. */
     public function isolatedDatabaseDestination(): string
     {
         return $this->isolated_database_destination ?? 'laravel_cloud';
