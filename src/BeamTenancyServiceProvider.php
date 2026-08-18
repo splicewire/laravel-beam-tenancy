@@ -77,7 +77,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->app->singleton(GcpCloudSqlDestination::class, function ($app) {
             $config = $app['config']->get('beam.tenancy.gcp_cloud_sql', []);
             $modulesDir = TofuModulesPath::dir();
-            $beamProvisionConfig = $app['config']->get('beam-provision', []);
+            $beamProvisionConfig = $app['config']->get('beam.provision', []);
 
             $tofu = new TofuApplyDispatcher(
                 runner: new NullRunner,
