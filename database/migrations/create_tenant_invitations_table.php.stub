@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Splicewire\Beam\Schema\ConvergentTable;
 
 /**
  * Publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE) — re-stamped to the install
@@ -18,20 +19,22 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('tenant_invitations', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('tenant_id');
-            $table->string('email');
-            $table->string('role')->default('member');
-            $table->string('token')->unique();
-            $table->uuid('invited_by');
-            $table->timestamp('accepted_at')->nullable();
-            $table->timestamps();
+        ConvergentTable::named('tenant_invitations')
+            ->define(function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('tenant_id');
+                $table->string('email');
+                $table->string('role')->default('member');
+                $table->string('token')->unique();
+                $table->uuid('invited_by');
+                $table->timestamp('accepted_at')->nullable();
+                $table->timestamps();
 
-            $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
-            $table->foreign('invited_by')->references('id')->on('users')->onDelete('cascade');
-            $table->unique(['tenant_id', 'email']);
-        });
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
+                $table->foreign('invited_by')->references('id')->on('users')->onDelete('cascade');
+                $table->unique(['tenant_id', 'email']);
+            })
+            ->assert();
     }
 
     public function down(): void
