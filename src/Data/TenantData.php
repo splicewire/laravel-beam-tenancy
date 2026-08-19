@@ -29,10 +29,13 @@ use Splicewire\Beam\Tenancy\Tenant;
  * than its tower counterpart by construction, not by omission.
  *
  * **The extension contract.** A host with richer tenant admin — plan, bill, entitlements, suspend,
- * scaffold packs — layers its OWN resource under this same `tenants` key and gates this one off
- * with `beam.tenancy.frame_resources.enabled=false`. `splicewire/tower` is the worked example, and
- * `splicewire-app` sets exactly that flag. Same mechanism `beam.accounts.frame_resources.enabled`
- * already gives the accounts resources.
+ * scaffold packs — layers its OWN resource under this same `tenants` key, and that is the whole
+ * mechanism: `ParticleResourceRegistry` keys by resource key and the LAST registration wins, so the
+ * host's declaration overrides this one by registering after it. `splicewire/tower` is the worked
+ * example. There is no off-switch to set — the `beam.tenancy.frame_resources.enabled` flag that used
+ * to exist (and its `beam.accounts.*` twin) duplicated, less reliably, what the registry already
+ * guarantees. A host that wants certainty about ordering lists the providers explicitly in
+ * `config/app.php`, or defers its own registration to an `$app->booted()` callback.
  *
  * READ-ONLY through Frame (`readOnly: true` ⇒ store/update/destroy 405, detail read still serves):
  * tenants arrive by provisioning, never from an admin create form — provisioning knows how to mint

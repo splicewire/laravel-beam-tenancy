@@ -52,34 +52,38 @@ it('is read-only in all three directions — tenants are provisioned, never crea
         ->and($definition->deletable)->toBeFalse();
 });
 
-it('is absent from the registry when the frame-resources gate is off', function () {
-    expect(config('beam.tenancy.frame_resources.enabled', true))->toBeTrue();
+it('yields the tenants key to a host resource registered after it', function () {
+    // Replaces the old `frame_resources.enabled` gate test. There is no off-switch any more, and none
+    // is needed: ParticleResourceRegistry keys by resource key and the LAST registration wins, so a
+    // host with richer tenant admin (splicewire/tower is the worked example) overrides simply by
+    // registering after this package. That IS the extension contract in TenantData's docblock — this
+    // asserts the mechanism the flag used to stand in for.
+    app()->singleton(ParticleResourceRegistry::class, fn () => new ParticleResourceRegistry);
 
-    // A fresh, isolated container: a disabled boot arms no afterResolving hook at all, so a registry
-    // resolved from THAT container stays empty. Asserting on the shared test app would only prove the
-    // hook was already armed in setUp.
-    $app = new Application(dirname(__DIR__));
-    $app->instance('config', new Repository([
-        'beam' => ['tenancy' => ['frame_resources' => ['enabled' => false]]],
-    ]));
-    $app->singleton(ParticleResourceRegistry::class, fn () => new ParticleResourceRegistry);
+    $provider = new BeamTenancyServiceProvider(app());
+    $provider->register();
+    $provider->boot();
 
-    $provider = new BeamTenancyServiceProvider($app);
-    $boot = new ReflectionMethod($provider, 'bootFrameResources');
-    $boot->setAccessible(true);
-    $boot->invoke($provider);
+    $registry = app(ParticleResourceRegistry::class);
 
-    expect($app->make(ParticleResourceRegistry::class)->has('tenants'))->toBeFalse();
+    // The package's neutral declaration is what's there first.
+    expect($registry->definition('tenants')->policy)->toBeNull();
+
+    // A host layers its own under the same key, afterwards.
+    $registry->registerDefinition(
+        $registry->definition('tenants')->withOverrides(policy: 'host.tenants')
+    );
+
+    expect($registry->definition('tenants')->policy)->toBe('host.tenants')
+        ->and($registry->has('tenants'))->toBeTrue();
 });
 
 it('registers nothing and does not fatal when beam\'s particle registry is absent', function () {
-    // The structural guard, distinct from the config gate above: a host that installs beam-tenancy
-    // without beam has no registry to register into. It must get nothing — not a partial
-    // registration, and not a fatal on a missing class.
+    // The structural guard — the one gate that survives, because it is not policy: a host that
+    // installs beam-tenancy without beam has no registry to register into. It must get nothing —
+    // not a partial registration, and not a fatal on a missing class.
     $app = new Application(dirname(__DIR__));
-    $app->instance('config', new Repository([
-        'beam' => ['tenancy' => ['frame_resources' => ['enabled' => true]]],
-    ]));
+    $app->instance('config', new Repository);
 
     $provider = new BeamTenancyServiceProvider($app);
     $boot = new ReflectionMethod($provider, 'bootFrameResources');
