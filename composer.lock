@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "03fa6a1a58f37812fb177698b1192dc1",
+    "content-hash": "a74128947881bf664ec9132d308c4f34",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -5040,7 +5040,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-data-schemas-scribe",
-                "reference": "64abaced7e468d15b811a92ee19ecc3f4325e65f"
+                "reference": "2a6dab00c5f2e74b5f4fcb4d5c881a9ed7cbc58b"
             },
             "require": {
                 "illuminate/support": "^11.0|^12.0|^13.0",
@@ -5379,6 +5379,66 @@
             }
         },
         {
+            "name": "rushing/laravel-schema-convergence",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../../rushing/laravel-schema-convergence",
+                "reference": "c53e75636fb51d2c3f7ac74a9c9c46d105bfc1bb"
+            },
+            "require": {
+                "illuminate/database": "^11.0|^12.0|^13.0",
+                "illuminate/support": "^11.0|^12.0|^13.0",
+                "php": "^8.3"
+            },
+            "require-dev": {
+                "laravel/pint": "^1.0",
+                "orchestra/testbench": "^9.0|^10.0|^11.0",
+                "phpunit/phpunit": "^11.0|^12.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Rushing\\SchemaConvergence\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Rushing\\SchemaConvergence\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "pint": [
+                    "@php -d memory_limit=512M vendor/bin/pint"
+                ],
+                "test": [
+                    "@php vendor/bin/phpunit"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Stephen Rushing",
+                    "email": "stephenr85@gmail.com"
+                }
+            ],
+            "description": "Convergent migration guards: a published `create_*` migration that creates the table when it is absent, adds the columns it is missing, and refuses — writing nothing — when a column already exists with an incompatible shape. Replaces the bare `Schema::hasTable($t) → return` guard, whose success report is a lie whenever another package won the filename race with a different shape.",
+            "keywords": [
+                "convergence",
+                "idempotent",
+                "laravel",
+                "migrations",
+                "publishing",
+                "schema"
+            ],
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
             "name": "rushing/laravel-versioning",
             "version": "dev-main",
             "dist": {
@@ -5517,7 +5577,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../schemastud/laravel-data-schemas",
-                "reference": "a77427fd7416e033cf3abce26583dfc689c6cb8f"
+                "reference": "d0bb0a38cc7308e44f0786c241d370a88c278d90"
             },
             "require": {
                 "galbar/jsonpath": "^3.0",
@@ -6899,7 +6959,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam",
-                "reference": "b42c1e66411e6e8e7f20cdf7e93e7c414d73f65c"
+                "reference": "ac900710af9559a7355b320f4608f88a348e1ff5"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -6908,9 +6968,11 @@
                 "php": "^8.3",
                 "rushing/codegen": "dev-main",
                 "rushing/laravel-data-filters": "*",
+                "rushing/laravel-data-schemas-scribe": "*",
                 "rushing/laravel-doctor": "*",
                 "rushing/laravel-permission-cascade": "*",
                 "rushing/laravel-popcorn": "dev-main",
+                "rushing/laravel-schema-convergence": "*",
                 "rushing/laravel-versioning": "dev-main",
                 "schemastud/laravel-data-schemas": "^1.0",
                 "schemastud/laravel-frame": "dev-main",
@@ -6921,7 +6983,8 @@
                 "spatie/laravel-model-status": "*",
                 "spatie/laravel-package-tools": "^1.16",
                 "spatie/laravel-schemaless-attributes": "*",
-                "spatie/typescript-transformer": "^2.0|^3.0"
+                "spatie/typescript-transformer": "^2.0|^3.0",
+                "symfony/yaml": "^6.0|^7.0|^8.0"
             },
             "require-dev": {
                 "laravel/pint": "^1.0",
@@ -7009,10 +7072,10 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-accounts",
-                "reference": "37b613715014dd49f157523af42cb15a1dcb52ad"
+                "reference": "5c612bc56a2871692991ac6786681e8e74be8609"
             },
             "require": {
-                "firebase/php-jwt": "^6.0",
+                "firebase/php-jwt": "^6.0|^7.0",
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
                 "illuminate/database": "^11.0|^12.0|^13.0",
                 "illuminate/support": "^11.0|^12.0|^13.0",
@@ -7021,8 +7084,11 @@
                 "laravel/passkeys": "^0.2",
                 "laravel/sanctum": "^4.0",
                 "php": "^8.2",
+                "rushing/laravel-data-filters": "*",
                 "rushing/laravel-data-schemas-scribe": "*",
                 "rushing/laravel-permission-cascade": "*",
+                "rushing/laravel-schema-convergence": "*",
+                "schemastud/laravel-data-schemas": "*",
                 "spatie/laravel-package-tools": "^1.16",
                 "spatie/laravel-permission": "^6.0",
                 "splicewire/laravel-beam": "*",
@@ -7073,10 +7139,7 @@
             "autoload": {
                 "psr-4": {
                     "Splicewire\\Beam\\Accounts\\": "src/"
-                },
-                "files": [
-                    "src/helpers.php"
-                ]
+                }
             },
             "autoload-dev": {
                 "psr-4": {
@@ -7120,7 +7183,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-provision",
-                "reference": "80c7ae7b3279c79539dca6e1aeeec8bba15bbda0"
+                "reference": "455313bf4bcbed3ca67cac1c46a83594bb9468eb"
             },
             "require": {
                 "illuminate/console": "^11.0|^12.0|^13.0",
@@ -7192,7 +7255,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-sitemap",
-                "reference": "166585eab0dc715fd9786864c617e03cfebd93fa"
+                "reference": "8832ba3ea6086fde4c138fed5a0bba7f15ac89c8"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -7270,12 +7333,13 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-workflows",
-                "reference": "95048dcd2423c7c3fbe4ab18e627ab0208688952"
+                "reference": "2a5d3e6cc4a12827ec7544a83baad8ce7a37c58e"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
                 "illuminate/support": "^11.0|^12.0|^13.0",
                 "php": "^8.2",
+                "rushing/laravel-schema-convergence": "*",
                 "spatie/laravel-activitylog": "^4.0|^5.0",
                 "splicewire/laravel-beam": "*",
                 "symfony/workflow": "^6.4|^7.0"
@@ -14803,6 +14867,7 @@
     "minimum-stability": "dev",
     "stability-flags": {
         "rushing/laravel-popcorn": 20,
+        "rushing/laravel-schema-convergence": 20,
         "rushing/php-graphine": 20
     },
     "prefer-stable": true,
