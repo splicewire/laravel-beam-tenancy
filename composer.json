@@ -28,7 +28,8 @@
         "splicewire/laravel-beam-sitemap": "*",
         "splicewire/laravel-beam-workflows": "*",
         "stancl/tenancy": "^3.0",
-        "symfony/process": "^6.0|^7.0|^8.0"
+        "symfony/process": "^6.0|^7.0|^8.0",
+        "rushing/laravel-schema-convergence": "dev-main"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",
