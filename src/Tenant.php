@@ -21,7 +21,7 @@ use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
-use Splicewire\Beam\Workflows\Display\Status;
+use Splicewire\Beam\Workflows\Facades\Status;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
