@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Tenancy;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -138,6 +139,17 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      */
     public function packageBooted(): void
     {
+        // The `tenant` morph alias — the wire identifier every polymorphic row pointing at a Tenant
+        // stores (billable, subscriptions, bills, grants …), and the permission-token prefix
+        // (ADR-0118). The package that OWNS the model owns its alias; a host should only have to
+        // declare aliases for its OWN models, and every beam-composing host needs this one.
+        //
+        // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: global strict mode rejects every
+        // class-string morph the host still has. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
+        // A host booting later keeps last-writer override authority, so a host that substitutes its
+        // own Tenant model can still repoint the alias.
+        Relation::morphMap(['tenant' => Tenant::class]);
+
         $this->registerSharedMigrationsPath();
         $this->bootFrameResources();
 
