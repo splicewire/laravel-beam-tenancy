@@ -232,42 +232,43 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     /**
      * Register this package's Frame/particle resources — today just the neutral `tenants` list.
      *
-     * **Always registers — there is no host off-switch, deliberately.**
-     * {@see ParticleResourceRegistry} keys by resource key and the LAST registration wins, so a host
-     * whose own richer resource owns `tenants` overrides simply by registering after this one. It does
-     * not need the package's permission, and a config flag only duplicated — less reliably — what the
-     * registry's own semantics already guarantee.
+     * ## Registers UNCONDITIONALLY, and the direct call is the point.
      *
-     * A host that wants certainty about the order lists the providers explicitly in `config/app.php`
-     * (preferred: declarative, and visible in one place), or defers its own registration to an
-     * `$app->booted()` callback. The former is preferable because the latter only works while exactly
-     * one party defers.
+     * Two prior shapes are retired here, both recorded because both looked correct.
      *
-     * The class_exists guard below stays, and is structural rather than policy: a host that installs
+     * 1. This wrapped its registration in `$this->app->afterResolving(…)`, on the reasoning that the hook
+     *    made boot order between beam and beam-tenancy irrelevant. Wrong in both halves: the hook NEVER
+     *    FIRED (beam resolves the registry in its own `packageBooted()`, and Laravel returns a cached
+     *    singleton without running resolving callbacks), and it was never needed — beam BINDS the registry
+     *    in the REGISTER phase, so `bound()` is already true here whatever the provider order, and the
+     *    direct `make()->register()` below is order-safe by construction. `afterResolving` on a particle
+     *    registry now throws (`DeadResolvingHookGuard`). Particle-contribution-seam ticket 07.
+     *
+     * 2. Ticket 07 then deliberately left the body EMPTY, because repairing the registration under the
+     *    old contract made things worse: the registry keyed by resource key and the last write won, so a
+     *    9-prop OOTB `tenants` registered at provider position 13 was wholesale-replaced by tower's
+     *    22-prop declaration at position 19 — manufacturing, for real, the god-projection the map exists
+     *    to retire. That reasoning died with the contract. Ticket 04 §A1 ruled that the CONTRIBUTOR
+     *    declares its own slice and the owner is never overwritten; ticket 15 deletes tower's competing
+     *    declaration. So the hold-back has nothing left to protect, and the registration is restored
+     *    (ticket 14) together with the widening that makes it worth registering.
+     *
+     * The `class_exists`/`bound` guard stays, and is structural rather than policy: a host that installs
      * beam-tenancy without beam's particle registry has no registry to register into, and should get
      * nothing rather than a fatal.
-     *
-     * Registration rides `afterResolving` so boot order between beam and beam-tenancy is irrelevant —
-     * the hook fires whenever the registry is first resolved, before or after this provider boots.
-     * The pattern beam-accounts' own `bootFrameResources` established.
      */
     protected function bootFrameResources(): void
     {
         if (
             ! class_exists(ParticleResourceRegistry::class)
             || ! class_exists(AttributedParticleDiscovery::class)
+            || ! $this->app->bound(ParticleResourceRegistry::class)
         ) {
             return;
         }
 
-        $this->app->afterResolving(
-            ParticleResourceRegistry::class,
-            function (ParticleResourceRegistry $registry): void {
-                $registry->register(
-                    AttributedParticleDiscovery::resourceFromAttribute(TenantData::class)
-                );
-            }
-        );
+        $this->app->make(ParticleResourceRegistry::class)
+            ->register(AttributedParticleDiscovery::resourceFromAttribute(TenantData::class));
     }
 
     protected function registerSharedMigrationsPath(): void

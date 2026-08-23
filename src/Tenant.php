@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -130,20 +131,63 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
+     * The tenant's ADR-0098 Display status timeline as an EAGER-LOADABLE relation — the same rows
+     * {@see statusTimelineQuery()} selects, in the same order, reachable from `with('statusEvents')`.
+     *
+     * This exists so a LIST read can batch. `isBusy()`, `provisioningIsStalled()` and the `statuses`
+     * projection all resolve off the newest/whole timeline, and each used to reach it through a fresh
+     * query — one per row, per prop, on every tenants list read (particle-contribution-seam ticket 03
+     * measured ~2 queries per row against a docblock claiming there was no N+1). Declared as an
+     * `includes:` entry on the `tenants` resource, the whole timeline arrives in ONE query for the page
+     * and every one of those reads is then free.
+     *
+     * The `log_name` constraint is what makes this the STATUS timeline rather than the tenant's whole
+     * audit trail — the central log is generic and `log_name` names the domain.
+     *
+     * @return MorphMany<CentralActivityLog, $this>
+     */
+    public function statusEvents(): MorphMany
+    {
+        return $this->morphMany(CentralActivityLog::class, 'subject')
+            ->where('log_name', config('beam.workflows.status_log_name', 'status'))
+            ->orderBy('created_at')
+            ->orderBy('id');
+    }
+
+    /**
      * The tenant's ADR-0098 Display status timeline — central-scoped so it is readable outside any
      * tenant boundary — oldest-first. `id` breaks same-instant ties from a fast synchronous
      * provisioning pipeline (the retired spatie-status timeline used microsecond timestamps for the
      * same reason; this one orders on the activity log's own key instead).
      *
+     * Answers from {@see statusEvents()} when the relation is loaded — that is the whole point of the
+     * relation — and re-queries otherwise. It deliberately does NOT memoize by loading the relation on
+     * the way past: this model EMITS onto its own timeline (`markProvisioning()` and friends), so a
+     * caller that emits and then re-reads on the same instance must see its own event. Eager-loading is
+     * the read path's opt-in; it is never something a read quietly turns on for everyone after it.
+     *
      * @return Collection<int, CentralActivityLog>
      */
     public function statusTimeline(): Collection
     {
-        return $this->statusTimelineQuery()->orderBy('created_at')->orderBy('id')->get();
+        return $this->relationLoaded('statusEvents')
+            ? $this->statusEvents
+            : $this->statusEvents()->get();
     }
 
+    /**
+     * The newest event on the timeline, or null when there is none.
+     *
+     * Answers from the loaded relation when there is one — that is the whole point of the relation,
+     * and it is what makes `isBusy()`/`provisioningIsStalled()` free on a list read. Falls back to a
+     * one-row descending query otherwise, rather than loading a whole timeline to read its last row.
+     */
     public function latestStatusEvent(): ?CentralActivityLog
     {
+        if ($this->relationLoaded('statusEvents')) {
+            return $this->statusEvents->last();
+        }
+
         return $this->statusTimelineQuery()->orderByDesc('created_at')->orderByDesc('id')->first();
     }
 
@@ -158,6 +202,11 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /**
      * Delete the tenant's Display status timeline. The central status rows have no FK to the tenant
      * (the central audit table is deliberately FK-free), so they would orphan on a hard delete.
+     *
+     * ⚠️ Deliberately still on {@see statusTimelineQuery()} rather than `statusEvents()`. This is a
+     * DELETE, and `statusEvents()` carries the timeline's `orderBy` — `DELETE … ORDER BY` is MySQL-only
+     * syntax, so routing the purge through the relation would break on Postgres and SQLite. The read
+     * side gains the relation; the write side keeps the unordered query.
      */
     public function purgeStatusTimeline(): void
     {
