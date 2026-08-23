@@ -39,11 +39,21 @@ use Splicewire\Beam\Workflows\Data\StatusEventData;
  * the only declaration for the key that had ever existed — map tickets 02 and 07.)
  *
  * The contract in force is ticket 04's: **a package that owns a concern declares that concern's own
- * named sub-projection** against this key, through beam's `ResourceContributionRegistry` (landing in
+ * named sub-projection** against this key, through beam's `ResourceContributionRegistry` (landed by
  * ticket 15 — named here in prose deliberately, since this package must never take a hard reference on
  * it). This class names no contributor and pre-declares no hook — the contributor reaches down, because it is the one that
  * already depends on this package. `laravel-beam-commerce` attaches plan / bill / entitlements that
- * way, which is what lets a beam host with commerce but no tower see commerce columns at all.
+ * way under the `commerce` key, which is what lets a beam host with commerce but no tower see commerce
+ * data at all.
+ *
+ * Two consequences of that seam are worth knowing while reading this class, because neither is visible
+ * from here:
+ *   - the contributed key is **absent** on a host without the contributing package, and **present
+ *     holding null** when the contributor ran and had nothing for this record. A caller can tell "not
+ *     installed" from "not on a plan"; this class does nothing to make that true, the seam does.
+ *   - commerce attaches its own `subscription`/`bills` relations onto `Tenant` from ABOVE
+ *     (`resolveRelationUsing`), so the slice batches. That is why this class can carry no commerce
+ *     property and still cost nothing extra per row.
  *
  * So this declaration is registered UNCONDITIONALLY (ticket 14), and nothing overwrites it. There is
  * no off-switch — the `beam.tenancy.frame_resources.enabled` flag that used to exist (and its
