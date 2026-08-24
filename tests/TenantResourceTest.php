@@ -11,6 +11,7 @@ use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
+use Splicewire\Beam\Tenancy\Data\CreateTenantData;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Tenant;
 
@@ -137,6 +138,52 @@ it('declares a model backing, read-only, non-filterable, with both includes', fu
     expect($definition->creatable)->toBeFalse()
         ->and($definition->editable)->toBeFalse()
         ->and($definition->deletable)->toBeFalse();
+});
+
+it('carries the nav placement that descended from tower with the teardown', function () {
+    $resource = AttributedParticleDiscovery::resourceFromAttribute(TenantData::class);
+
+    // Ticket 20 step 2. These say where the resource sits in the admin nav, not what it projects, so
+    // they descend as DEFAULTS rather than as a fixed answer — a host that disagrees overlays them
+    // per realm, because nav is read off `definitions($realm)`, the arm RealmResourceRegistry::apply()
+    // actually reaches. (`editData` below could not be re-homed that way: the resource path passes
+    // `$realm === null` and gets the base back untouched.)
+    expect($resource->section)->toBe('platform')
+        ->and($resource->navOrder)->toBe(1)
+        ->and($resource->routeName)->toBe('tenants.index');
+});
+
+it('declares a create form of THREE props, and the three it does not carry are the point', function () {
+    $resource = AttributedParticleDiscovery::resourceFromAttribute(TenantData::class);
+
+    expect($resource->editData)->toBe(CreateTenantData::class);
+
+    $props = array_map(
+        fn (ReflectionParameter $p) => $p->getName(),
+        (new ReflectionClass(CreateTenantData::class))->getConstructor()->getParameters(),
+    );
+
+    // ⚠️ A DELIBERATE capability loss, asserted so re-adding is a conscious act (ticket 17 §A5).
+    // Tower's `CreateTenantData` fused three owners' fields into one class — the tenancy core, plus
+    // beam-commerce's `planSlug`/`commitmentMonths` and tower's `scaffoldPackSlugs` — for exactly one
+    // reason: a declaration carries a SINGLE `editData` slot. That is the god-projection's third
+    // instance, after `tenants` (last-registration-wins on a key) and `TowerAuthUserData`
+    // (last-bind-wins on a binding), and the read-side contribution seam cannot cure it: it folds onto
+    // an already-projected row and `ResourceContribution` has no write arm at all.
+    //
+    // So the operator create form no longer selects a plan or a scaffold pack, and a tenant is created
+    // plan-less and subscribed separately. The loss is the evidence that graduates the write-side seam
+    // out of the map's fog — do not quietly restore it.
+    expect($props)->toBe(['slug', 'name', 'ownerEmail']);
+});
+
+it('names no commerce symbol in the create form either', function () {
+    // The read projection's seam guard has a twin here, because `editData` is the other place a
+    // commerce concept could descend into this package and close the dependency cycle
+    // (`laravel-beam-commerce` REQUIRES `laravel-beam-tenancy`).
+    $source = file_get_contents(__DIR__.'/../src/Data/CreateTenantData.php');
+
+    expect($source)->not->toContain('Splicewire\\Beam\\Commerce');
 });
 
 it('registers nothing and does not fatal when beam\'s particle registry is absent', function () {

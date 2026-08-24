@@ -85,6 +85,23 @@ use Splicewire\Beam\Workflows\Data\StatusEventData;
     group: 'Platform',
     icon: 'building',
     form: 'bare',
+    // Nav placement, descended from tower's declaration with the teardown (ticket 20 step 2). These are
+    // not projection — they say where the resource sits in the admin nav — and unlike `editData` a host
+    // that disagrees keeps a working escape hatch: nav is read off `definitions($realm)`, the manifest
+    // arm, which is the one `RealmResourceRegistry::apply()` actually overlays. (The resource path
+    // passes `$realm === null` and gets the base back untouched, which is why `editData` below could NOT
+    // be re-homed that way — a trap this map has fallen into three times.)
+    section: 'platform',
+    navOrder: 1,
+    routeName: 'tenants.index',
+    // The create-SCHEMA escape hatch (ADR-0156 §83): the schema endpoint emits the create form the
+    // admin UI renders and SUBMITS to the REST provisioning endpoint — a schema surface, not a Frame
+    // write path, which is why it coexists with `readOnly: true`.
+    //
+    // ⚠️ Narrowed on the way down: tower's version carried `planSlug`/`commitmentMonths` (beam-commerce)
+    // and `scaffoldPackSlugs` (tower). See {@see CreateTenantData} for why those three are lost rather
+    // than contributed.
+    editData: CreateTenantData::class,
     readOnly: true,
 )]
 #[TypeScript]
