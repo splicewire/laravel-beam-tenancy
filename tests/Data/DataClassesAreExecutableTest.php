@@ -1,6 +1,7 @@
 <?php
 
 use Spatie\LaravelData\Contracts\BaseData;
+use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
 
@@ -70,6 +71,19 @@ it('has the laravel-data provider booted, mirroring the host config', function (
     // Guards the fix itself. Without the provider `config('data')` is null and every case below
     // fatals rather than fails, which is a much worse signal.
     expect(config('data'))->not->toBeNull();
+
+    // `config('data')` being non-null is NOT a valid probe that the provider booted, and this test
+    // used to rest on it. `defineEnvironment()` sets `data.*` keys itself, which MATERIALISES the
+    // config array whether or not the provider ever registered. Measured in
+    // `splicewire/laravel-composition-music-spine` (ticket 85): with the provider commented out,
+    // `config('data')` returned `['name_mapping_strategy', 'structure_caching']` and the assertion
+    // above stayed green. The provider's own registration is the only thing that proves it booted.
+    expect(app()->getLoadedProviders())->toHaveKey(LaravelDataServiceProvider::class);
+
+    // And a key only the PROVIDER supplies, which `defineEnvironment()` does not. Without it
+    // `getValidationRules()` does not throw — it DEGRADES SILENTLY to rule-less arrays, so the
+    // data-driven cases below would pass while proving nothing.
+    expect(config('data.rule_inferrers'))->not->toBeEmpty();
 
     // And guards against the FALSE GREEN: the package default is `null`, only the host
     // (`~/Herd/splicewire-app/config/data.php`) sets the mapper, and a DTO that hydrates without it
