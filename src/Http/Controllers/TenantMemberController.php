@@ -4,11 +4,12 @@ namespace Splicewire\Beam\Tenancy\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule;
+use Rushing\LaravelDataSchemasScribe\Attributes\RequestFromData;
 use Splicewire\Beam\Accounts\Data\MembershipData;
 use Splicewire\Beam\Accounts\Data\RoleOptionsData;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Http\Controller;
+use Splicewire\Beam\Tenancy\Data\TenantMemberRoleInputData;
 
 class TenantMemberController extends Controller
 {
@@ -60,10 +61,14 @@ class TenantMemberController extends Controller
         );
     }
 
+    /**
+     * Change a member's role
+     *
+     * Move an existing member to a different role, ownership transfer included. Owner-gated.
+     */
+    #[RequestFromData(TenantMemberRoleInputData::class)]
     public function updateRole(Request $request, string $id)
     {
-        $request->validate(['role' => ['required', Rule::in(Role::values())]]);
-
         $tenant = tenant();
         $currentUser = auth()->user();
 
@@ -71,15 +76,22 @@ class TenantMemberController extends Controller
         // that owns membership authorization), not a hand-rolled role check.
         Gate::authorize('manageMembers', $tenant);
 
+        // Hydrated BELOW the gate. The inline `validate()` this replaced ran ABOVE it, so a member with
+        // no `manageMembers` ability who sent a malformed body got 422 instead of 403 — the field
+        // vocabulary leaked to a caller with no write access. That is ticket 27's measured trap, found
+        // here already in place rather than introduced by the conversion; the status an unauthorized
+        // caller sees for a bad body moves 422 -> 403, which is the correct order.
+        $input = TenantMemberRoleInputData::validateAndCreate($request);
+
         // Can't change your own role if you're the last owner
-        if ($id === $currentUser->id && $request->role !== Role::Owner->value) {
+        if ($id === $currentUser->id && $input->role !== Role::Owner->value) {
             $ownerCount = $tenant->users()->wherePivot('role', Role::Owner->value)->count();
             if ($ownerCount <= 1) {
                 abort(422, 'Cannot remove the last owner. Transfer ownership first.');
             }
         }
 
-        $tenant->users()->updateExistingPivot($id, ['role' => $request->role]);
+        $tenant->users()->updateExistingPivot($id, ['role' => $input->role]);
 
         // Re-read so the data slot carries the member's post-update state.
         $member = $tenant->users()->wherePivotNull('removed_at')->find($id);
