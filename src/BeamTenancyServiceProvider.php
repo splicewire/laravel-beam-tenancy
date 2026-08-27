@@ -16,10 +16,12 @@ use Splicewire\Beam\Provision\Tofu\CabTokenMinter;
 use Splicewire\Beam\Provision\Tofu\TenantDatabaseRootConfigRenderer;
 use Splicewire\Beam\Provision\Tofu\TofuApplyDispatcher;
 use Splicewire\Beam\Provision\Tofu\TofuModulesPath;
+use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
 use Splicewire\Beam\Tenancy\Data\TenantData;
+use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
@@ -196,6 +198,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             );
         }
 
+        $this->bootSeed();
+
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;
         }
@@ -269,6 +273,40 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
 
         $this->app->make(ParticleResourceRegistry::class)
             ->register(AttributedParticleDiscovery::resourceFromAttribute(TenantData::class));
+    }
+
+    /**
+     * Register {@see DemoTenantSeeder} into beam-core's seed manifest, so `splicewire:beam:seed`
+     * seats the demo roster on a tenant as part of the one stack-wide seed run.
+     *
+     * Mirrors beam-accounts' `WiresSeed` in all three of its load-bearing properties:
+     *
+     * - **Inert without the manifest.** A host that composes beam-tenancy without beam's seed
+     *   command has nothing to register into and pays nothing.
+     * - **Gated, non-production by default.** `beam.tenancy.demo.seed_tenant` defaults to null,
+     *   and a null resolves HERE to `! production` — the manifest's own check is a raw
+     *   `config($gate)` and cannot run environment logic, so the resolved boolean is written back
+     *   onto the same key. Explicit config always wins.
+     * - **Ordered after beam-accounts.** `order: 20` against beam-accounts' `10`, so the demo
+     *   users exist before this seeder seats them. (The seeder `firstOrCreate`s them anyway, so
+     *   ordering is an optimisation, not a dependency.)
+     */
+    protected function bootSeed(): void
+    {
+        if (! class_exists(BeamSeedManifest::class) || ! $this->app->bound(BeamSeedManifest::class)) {
+            return;
+        }
+
+        $flag = config('beam.tenancy.demo.seed_tenant');
+        $enabled = $flag !== null ? (bool) $flag : ! $this->app->environment('production');
+        config(['beam.tenancy.demo.seed_tenant' => $enabled]);
+
+        $this->app->make(BeamSeedManifest::class)->register(
+            package: 'splicewire/laravel-beam-tenancy',
+            seederClass: DemoTenantSeeder::class,
+            order: 20,
+            configGate: 'beam.tenancy.demo.seed_tenant',
+        );
     }
 
     protected function registerSharedMigrationsPath(): void

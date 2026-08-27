@@ -7,9 +7,12 @@ use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
+use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Tenant;
+use Stancl\Tenancy\Contracts\UniqueIdentifierGenerator;
 use Stancl\Tenancy\Database\Models\Domain;
+use Stancl\Tenancy\UUIDGenerator;
 
 class TestCase extends Orchestra
 {
@@ -32,6 +35,24 @@ class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
+        // beam-core BINDS the seed manifest as a singleton in its REGISTER phase, and this harness
+        // does not boot beam-core. Bound here (before the package providers register) so
+        // BeamTenancyServiceProvider's own seed registration has the same container to land in that
+        // it has at a real host — otherwise the registration silently no-ops and the test that
+        // asserts it would be measuring an empty room.
+        $app->singleton(BeamSeedManifest::class);
+
+        // ⚠️ stancl's `GeneratesIds::getIncrementing()` returns `! app()->bound(UniqueIdentifierGenerator)`
+        // — so with the generator UNBOUND, a Tenant is treated as AUTO-INCREMENTING no matter that the
+        // model declares `$incrementing = false`. The row still lands with the right string id, and the
+        // in-memory model's key is then overwritten with sqlite's rowid (`1`), silently. Anything
+        // reading `$tenant->getKey()` after a save — every `belongsToMany` write, so every seat this
+        // package's seeders create — writes `tenant_id = '1'`. stancl's own TenancyServiceProvider
+        // binds this off `tenancy.id_generator`; this harness does not boot that provider, so it binds
+        // the same default here. Measured: without this line the demo-tenant seats insert against a
+        // tenant that does not exist, and `members()` reads back empty with no error anywhere.
+        $app->bind(UniqueIdentifierGenerator::class, UUIDGenerator::class);
+
         // stancl resolves its Tenant/Domain models off config, and its published config always sets
         // them. Without them, anything touching HasDomains fatals on `new null`.
         $app['config']->set('tenancy.tenant_model', Tenant::class);
@@ -68,6 +89,34 @@ class TestCase extends Orchestra
             $table->string('parent_tenant_id')->nullable();
             $table->json('data')->nullable();
             $table->timestamps();
+        });
+
+        // Mirrors the central user table a host owns (T22) — UUID-keyed, because
+        // `create_tenant_users_table.php.stub` declares `tenant_users.user_id` as a `uuid`.
+        // Deliberately carries no spatie permission tables alongside it: the seats on
+        // `tenant_users` must be the ONLY authorization signal available in this harness, or a
+        // gate test cannot tell a seat apart from an ambient central grant.
+        Schema::create('users', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('name')->nullable();
+            $table->string('email')->unique();
+            $table->string('password')->nullable();
+            $table->timestamp('email_verified_at')->nullable();
+            $table->timestamps();
+        });
+
+        // Mirrors create_tenant_users_table.php.stub (FKs omitted — sqlite in-memory, and the
+        // shape under test is the pivot's columns, not its referential integrity).
+        Schema::create('tenant_users', function (Blueprint $table) {
+            $table->string('tenant_id');
+            $table->uuid('user_id');
+            $table->string('role')->default('member');
+            $table->timestamp('invited_at')->nullable();
+            $table->timestamp('accepted_at')->nullable();
+            $table->timestamp('removed_at')->nullable();
+            $table->timestamps();
+
+            $table->primary(['tenant_id', 'user_id']);
         });
     }
 }

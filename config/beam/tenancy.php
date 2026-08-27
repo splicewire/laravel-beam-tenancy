@@ -8,6 +8,38 @@ return [
     ],
 
     /*
+     * The demo TENANT — the tenancy-side counterpart to beam-accounts' demo TEAM.
+     *
+     * beam-accounts seats its role-differentiated demo roster (demo-owner / demo-admin /
+     * demo-member) on a beam-accounts `Team`. Nothing seats them on a *tenant*, so an estate
+     * with a full demo roster still had zero role-differentiated `tenant_users` seats — every
+     * seat belonged to a root account, and no test could obtain "an ordinary tenant member
+     * holding no central permissions". `DemoTenantSeeder` closes that: it reaches DOWN into
+     * beam-accounts' roster (beam-tenancy requires beam-accounts, never the reverse) and seats
+     * it on a tenant of its own.
+     *
+     * `seed_tenant` is the seed-manifest gate. Null (the default) resolves at boot to
+     * `! production`, mirroring `beam.accounts.demo.seed_users` — dev and preview seed by
+     * default, production never fabricates demo data. An explicit value always wins.
+     *
+     * The tenant is DEDICATED (its own id/slug), not an existing one. Two reasons, both
+     * measured: an existing tenant may already carry seats whose `role` is outside the
+     * `Role` enum (`service` rows exist in the wild, and `memberRole()` raises a `ValueError`
+     * on them), and hosts keep some tenants' role grants in a per-tenant `model_has_roles`
+     * that nothing reads. A tenant this seeder owns end-to-end has neither problem.
+     */
+    'demo' => [
+        'seed_tenant' => env('BEAM_TENANCY_SEED_DEMO_TENANT'),
+
+        'tenant' => [
+            // NOT `demo` — that slug is already taken by hand-made tenants in the estate, and
+            // the point of this one is that the seeder owns every seat on it.
+            'slug' => env('BEAM_TENANCY_DEMO_TENANT_SLUG', 'beam-demo'),
+            'name' => 'Beam Demo',
+        ],
+    ],
+
+    /*
      * The package's CENTRAL tenancy substrate migrations
      * (tenants/domains/tenant_users/tenant_invitations + tenant-row ALTERs) are
      * PUBLISH-ONLY .stub files, registered via spatie/laravel-package-tools'

@@ -90,6 +90,54 @@ Tenant::systemRole();                          // configured role marker
 The resolver knows nothing about what a given app's system tenant *does* — it resolves, stamps and
 seeds, and stops there.
 
+## The demo tenant
+
+`Database\Seeders\DemoTenantSeeder` seats `splicewire/laravel-beam-accounts`' demo roster —
+`demo-owner`, `demo-admin`, `demo-member` — on a dedicated tenant (`beam-demo` by default), one
+`tenant_users` seat per `Role`.
+
+It exists because the two halves never met. beam-accounts provisions a role-differentiated demo
+roster with **no** central spatie permissions, and seats it on a beam-accounts *team*; it cannot
+seat it on a *tenant*, since beam-tenancy requires beam-accounts and not the reverse. So a host
+could have a perfect role-less actor and no tenant for it to be an ordinary member of, and no
+authorization regression test could be written against a tenant-scoped gate. After this seeder,
+`manageInvitations` is allowed for the Admin seat and denied for the Member seat on the same tenant,
+off nothing but seeded data.
+
+```php
+// Runs as part of the stack-wide seed, gated:
+php artisan splicewire:beam:seed
+
+// Or on its own:
+php artisan db:seed --class="Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder"
+```
+
+```php
+'demo' => [
+    // The seed-manifest gate. Null resolves at boot to `! production`.
+    'seed_tenant' => env('BEAM_TENANCY_SEED_DEMO_TENANT'),
+
+    'tenant' => [
+        'slug' => env('BEAM_TENANCY_DEMO_TENANT_SLUG', 'beam-demo'),
+        'name' => 'Beam Demo',
+    ],
+],
+```
+
+Notes worth having before you change it:
+
+- **The tenant is dedicated, not borrowed.** Seating into an existing tenant buys two live hazards:
+  seats whose `role` is outside the `Role` enum (`service` rows exist in the estate, and
+  `memberRole()` raises a `ValueError` on them), and hosts whose per-tenant `model_has_roles`
+  is never read because the role models pin the central connection. The seeder never iterates seats
+  it did not create, for the same reason.
+- **`solo` is excluded.** It models the team-of-one *shape*, not a role; it has no business sharing
+  a tenant with three others.
+- **Idempotent.** Users are `firstOrCreate`d, seats go through `TeamContract::assignMember()`, and
+  `accepted_at` is stamped only when null — a second run is row-for-row identical.
+- **Never in production.** The gate defaults to on everywhere else, mirroring
+  `beam.accounts.demo.seed_users`.
+
 ## Dependency direction
 
 **`splicewire/laravel-beam-commerce` requires this package.** Nothing here may name a
