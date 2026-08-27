@@ -58,6 +58,18 @@ class TestCase extends Orchestra
         $app['config']->set('tenancy.tenant_model', Tenant::class);
         $app['config']->set('tenancy.domain_model', Domain::class);
 
+        // The tenant-storage half of stancl's config, which its published `config/tenancy.php`
+        // always sets and this harness (which does not boot stancl's provider) otherwise leaves
+        // null. Mirrors the flagship's values. Without `central_connection` there is no template
+        // connection to resolve a driver from, so nothing can tell whether the host provisions
+        // tenant databases at all — the question `DemoTenantSeeder::provision()` turns on.
+        // `managers` is deliberately left EMPTY here: the default harness host is one with no
+        // tenant databases, and a test that wants provisioning registers its own recorder.
+        $app['config']->set('tenancy.database.central_connection', 'testing');
+        $app['config']->set('tenancy.database.prefix', 'tenant_');
+        $app['config']->set('tenancy.database.suffix', '');
+        $app['config']->set('tenancy.database.managers', []);
+
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [
             'driver' => 'sqlite',

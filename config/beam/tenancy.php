@@ -34,8 +34,36 @@ return [
         'tenant' => [
             // NOT `demo` — that slug is already taken by hand-made tenants in the estate, and
             // the point of this one is that the seeder owns every seat on it.
-            'slug' => env('BEAM_TENANCY_DEMO_TENANT_SLUG', 'beam-demo'),
+            //
+            // UNDERSCORE, not a hyphen. The tenant id is not just an id: stancl derives the
+            // tenant's storage name from it (`tenancy.database.prefix` . id), so this slug
+            // becomes a Postgres SCHEMA name — and it is spliced into a `search_path`, a
+            // Redis `prefix_base`, and a search-index name besides. `tenant_beam-demo` is not
+            // a legal bare Postgres identifier and survives only as long as every consumer
+            // remembers to quote it; `tenant_beam_demo` needs nobody to remember anything, and
+            // matches every id already in the estate (`system`, `demo`, `entreport`), all of
+            // which are single bare words. {@see DemoTenantSeeder::slug()} rejects anything
+            // outside `[a-z0-9_]` rather than let a hyphen back in through env.
+            'slug' => env('BEAM_TENANCY_DEMO_TENANT_SLUG', 'beam_demo'),
             'name' => 'Beam Demo',
+
+            /*
+             * Whether the seeder PROVISIONS the tenant's storage (create the schema, migrate it)
+             * rather than leaving a central row pointing at a database that does not exist.
+             *
+             * On by default, and it is the fix for a real defect: the first cut of this seeder
+             * created the tenant row and stopped. At the flagship the host's own `TenantCreated`
+             * pipeline is `shouldBeQueued(true)` against a redis queue with no worker running, so
+             * nothing provisioned it — the row landed with no `tenancy_db_name` and no schema, and
+             * `$tenant->run(...)` threw `Database tenant_beam-demo does not exist.` A tenant that
+             * throws on connect is a landmine for every `Tenant::all()` sweep in the estate: the
+             * loop ABORTS on it, and the partial list it leaves behind reads like a complete one.
+             *
+             * Set false only on a host that provisions demo tenants some other way and wants the
+             * seeder to stop at central seats. It is not a way to opt out of the storage — it is a
+             * statement that something else owns it.
+             */
+            'provision' => env('BEAM_TENANCY_DEMO_TENANT_PROVISION', true),
         ],
     ],
 

@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
@@ -9,16 +10,33 @@ use Splicewire\Beam\Accounts\Facades\BeamDemo;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Tenant;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\RecordingTenantDatabaseManager;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\RecordingTenantsMigrateCommand;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\User;
 
 beforeEach(function () {
     config([
         'auth.providers.users.model' => User::class,
         'beam.accounts.user_model' => null,
-        'beam.tenancy.demo.tenant.slug' => 'beam-demo',
+        'beam.tenancy.demo.tenant.slug' => 'beam_demo',
         'beam.tenancy.demo.tenant.name' => 'Beam Demo',
     ]);
+
+    RecordingTenantDatabaseManager::reset();
+    RecordingTenantsMigrateCommand::reset();
 });
+
+/**
+ * Turn this harness into a host that HAS tenant databases: register a recording manager for the
+ * sqlite driver and a recording `tenants:migrate`. Both are opt-in per test, because the harness's
+ * default posture — no manager, no command — is itself a case worth pinning.
+ */
+function hostWithTenantDatabases(): void
+{
+    config(['tenancy.database.managers.sqlite' => RecordingTenantDatabaseManager::class]);
+
+    Artisan::registerCommand(new RecordingTenantsMigrateCommand);
+}
 
 function seedDemoTenant(): Tenant
 {
@@ -165,4 +183,107 @@ it('DELIVERABLE: the seeded dataset discriminates an authorization gate', functi
     expect($owner->can('manageMembers', $tenant))->toBeTrue()
         ->and($admin->can('manageMembers', $tenant))->toBeFalse()
         ->and($member->can('manageMembers', $tenant))->toBeFalse();
+});
+
+/**
+ * ⚠️ THE REGRESSION.
+ *
+ * The first cut of this seeder created the tenant row and stopped. At the flagship the host's
+ * `TenantCreated` pipeline is `shouldBeQueued(true)` against a redis queue with no worker, so
+ * nothing provisioned it: the row landed carrying `owner_email` and nothing else — no
+ * `tenancy_db_name`, no schema — and `$tenant->run(...)` threw `Database tenant_beam-demo does
+ * not exist.` Every other tenant in the estate (`system`, `demo`, `entreport`) carries the key
+ * and has the schema.
+ *
+ * That is a landmine, not a cosmetic gap: the estate sweeps with a bare `Tenant::all()` loop, and
+ * a tenant that throws on connect ABORTS the loop, leaving a partial list that reads like a
+ * complete one.
+ */
+it('REGRESSION: provisions the tenant storage, so the row is one a sweep can connect to', function () {
+    hostWithTenantDatabases();
+
+    $tenant = seedDemoTenant();
+
+    // The key stancl derives the connection from — absent on the broken row.
+    expect($tenant->getInternal('db_name'))->toBe('tenant_beam_demo')
+        ->and(DB::table('tenants')->where('id', 'beam_demo')->value('data'))
+        ->toContain('tenancy_db_name');
+
+    // And the storage was actually asked for, once.
+    expect(RecordingTenantDatabaseManager::$created)->toBe(['tenant_beam_demo']);
+});
+
+it('migrates the new schema, SCOPED to its own tenant key and never fanned out', function () {
+    hostWithTenantDatabases();
+
+    seedDemoTenant();
+
+    expect(RecordingTenantsMigrateCommand::$calls)->toBe([['beam_demo']]);
+});
+
+it('provisions idempotently — a second run creates no second database', function () {
+    hostWithTenantDatabases();
+
+    seedDemoTenant();
+    seedDemoTenant();
+
+    // stancl's own `ensureTenantCanBeCreated()` THROWS on an existing database rather than
+    // no-opping, so the seeder must check before dispatching, not lean on the job.
+    expect(RecordingTenantDatabaseManager::$created)->toBe(['tenant_beam_demo'])
+        ->and(RecordingTenantsMigrateCommand::$calls)->toHaveCount(2);
+});
+
+it('leaves storage alone when the host already provisioned it', function () {
+    hostWithTenantDatabases();
+
+    // A host whose TenantCreated pipeline ran normally: the schema is already there.
+    RecordingTenantDatabaseManager::$existing = ['tenant_beam_demo'];
+
+    seedDemoTenant();
+
+    expect(RecordingTenantDatabaseManager::$created)->toBe([]);
+});
+
+it('still seats the roster on a host with no tenant-database manager, and warns instead of throwing', function () {
+    // The harness's default posture, and a real one: `tenancy.database.managers` is empty. Whether
+    // this host provisions tenant databases is a fact about the HOST, so it is advisory.
+    $tenant = seedDemoTenant();
+
+    expect($tenant->getInternal('db_name'))->toBeNull()
+        ->and($tenant->members())->toHaveCount(3);
+});
+
+it('does not provision when the host says something else owns the storage', function () {
+    hostWithTenantDatabases();
+    config(['beam.tenancy.demo.tenant.provision' => false]);
+
+    $tenant = seedDemoTenant();
+
+    expect(RecordingTenantDatabaseManager::$created)->toBe([])
+        ->and(RecordingTenantsMigrateCommand::$calls)->toBe([])
+        ->and($tenant->members())->toHaveCount(3);
+});
+
+/**
+ * The hyphen. `tenant_beam-demo` is not a legal bare Postgres identifier, and the slug is spliced
+ * into a schema name, a `search_path`, a Redis `prefix_base` and a search-index name. Whether the
+ * slug is a bare identifier is the one thing the DECLARATION's author can get right without
+ * knowing the host — so this one throws where the rest of the class warns.
+ */
+it('refuses a slug that is not a bare identifier — the shipped default was hyphenated', function () {
+    config(['beam.tenancy.demo.tenant.slug' => 'beam-demo']);
+
+    expect(fn () => app(DemoTenantSeeder::class)->run())
+        ->toThrow(InvalidArgumentException::class, 'beam-demo');
+
+    expect(DB::table('tenants')->count())->toBe(0);
+});
+
+it('ships an underscore default, matching every tenant id already in the estate', function () {
+    // Re-read the package config rather than the value beforeEach set, so this pins the SHIPPED
+    // default and not the test's own fixture.
+    $shipped = require __DIR__.'/../config/beam/tenancy.php';
+
+    expect($shipped['demo']['tenant']['slug'])->toBe('beam_demo')
+        ->and($shipped['demo']['tenant']['provision'])->toBeTrue();
 });
