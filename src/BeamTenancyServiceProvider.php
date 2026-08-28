@@ -168,7 +168,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // the audits' file walks treat it as empty — so the pair stays honest rather than pointing at
         // some other package's routes.
         if ($this->app->bound(AuditScanPaths::class)) {
-            $this->app->make(AuditScanPaths::class)->register(
+            $this->app->make(AuditScanPaths::class)->registerScanPaths(
                 'splicewire/laravel-beam-tenancy',
                 __DIR__.'/Http',
                 dirname(__DIR__).'/routes',
