@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Schemastud\Frame\Attributes\Column;
 use Schemastud\Frame\Attributes\NotInList;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Workflows\Data\StatusEventData;
@@ -105,7 +105,7 @@ use Splicewire\Beam\Workflows\Data\StatusEventData;
     readOnly: true,
 )]
 #[TypeScript]
-class TenantData extends Data
+class TenantData extends BeamData
 {
     public function __construct(
         #[NotInList]

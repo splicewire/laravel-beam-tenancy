@@ -3,7 +3,7 @@
 namespace Splicewire\Beam\Tenancy\Data;
 
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 
 /**
  * The CREATE input shape for `tenants` — the `editData` escape hatch (ADR-0156 §83) that drives the
@@ -31,7 +31,7 @@ use Splicewire\Beam\Data\Data;
  * close the same dependency cycle the read-side seam guard exists to prevent.
  */
 #[TypeScript]
-class CreateTenantData extends Data
+class CreateTenantData extends BeamData
 {
     public function __construct(
         public string $slug,

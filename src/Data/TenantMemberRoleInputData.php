@@ -6,7 +6,7 @@ use Illuminate\Validation\Rule;
 use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Splicewire\Beam\Accounts\Enums\Role;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 
 /**
  * The change-a-member's-role body (api-surface-coherence ticket 64).
@@ -15,7 +15,7 @@ use Splicewire\Beam\Data\Data;
  * `Rule::in(Role::values())` rather than freezing a copy of the list here — a deployment that adds a role
  * gains it on both surfaces at once.
  */
-class TenantMemberRoleInputData extends Data
+class TenantMemberRoleInputData extends BeamData
 {
     public function __construct(
         #[Description('The role to move the member to. Must be one of the values the member-roles endpoint lists as assignable, ownership transfer included.')]
