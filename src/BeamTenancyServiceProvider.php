@@ -20,7 +20,6 @@ use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
-use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
@@ -271,8 +270,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             return;
         }
 
-        $this->app->make(ParticleResourceRegistry::class)
-            ->register(AttributedParticleDiscovery::resourceFromAttribute(TenantData::class));
+        // This package's own declaration root, scanned rather than named. `TenantData` is the only
+        // declaration under it today; a second one registers by existing as a file, which is the only
+        // version of this that cannot rot. Idempotent by key — a host that also lists the class in
+        // `beam.core.particle.classes` gets the same registration twice and the same result.
+        $this->app->make(AttributedParticleDiscovery::class)
+            ->discover(paths: [__DIR__.'/Data']);
     }
 
     /**
