@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
+use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
@@ -128,6 +129,44 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     }
 
     /**
+     * Seat `tenancy.tenant_model` on THIS package's Tenant unless the host has chosen its own.
+     *
+     * ⚠️ The package publishes a `tenants` schema only its own model can key — NOT NULL `name`,
+     * unique `slug`, `parent_tenant_id`, all listed in {@see Tenant::getCustomColumns()}. Stancl's
+     * model lists `['id']`, so its `HasDataColumn` trait routes every other attribute into the
+     * `data` JSON and the NOT NULL column is never written. Shipping the schema without the model
+     * that can key it is the same pairing defect beam-accounts hit with `permission.models.role`.
+     *
+     * Guarded THREE ways, because a package writing into another package's config namespace has to
+     * be conservative:
+     *
+     *  - `beam.tenancy.bind_tenant_model` (default true) lets a host opt out wholesale.
+     *  - It only replaces stancl's OWN default. Any other value means the host chose, and a host
+     *    choice always wins — the same last-writer rule as the morph alias above.
+     *  - It runs in `packageBooted()`, after every provider has registered and after a published
+     *    `config/tenancy.php` has been read, so "the host chose" is actually knowable.
+     *
+     * Measured 2026-08-30: of the three `~/Herd` hosts installing beam-tenancy, only `splicewire-app`
+     * worked, and only because someone had hand-written this binding. `tower` was live-broken;
+     * `satellite` was latent. The package suite could not see it — `InteractsWithTenancy` pins the
+     * model for tests, so the harness booted what no host did.
+     */
+    protected function bindTenantModel(): void
+    {
+        if (! config('beam.tenancy.bind_tenant_model', true)) {
+            return;
+        }
+
+        // Only when the host has expressed no preference — i.e. the value is still the one stancl
+        // merges from its own package config.
+        if (config('tenancy.tenant_model') !== StanclTenant::class) {
+            return;
+        }
+
+        config(['tenancy.tenant_model' => Tenant::class]);
+    }
+
+    /**
      * Re-bind the sitemap base-URL port to the multi-domain resolver (ADR-0166 §3). beam-sitemap binds
      * the config-default in its own `register()`; we override it here in `packageBooted()` (after all
      * providers have registered) with a resolver that returns the active tenant's domain, falling back
@@ -140,6 +179,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      */
     public function packageBooted(): void
     {
+        $this->bindTenantModel();
+
         // The `tenant` morph alias — the wire identifier every polymorphic row pointing at a Tenant
         // stores (billable, subscriptions, bills, grants …), and the permission-token prefix
         // (ADR-0118). The package that OWNS the model owns its alias; a host should only have to

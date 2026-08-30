@@ -1,6 +1,29 @@
 <?php
 
 return [
+    /*
+     * Bind `tenancy.tenant_model` to beam-tenancy's own Tenant when the host has not chosen one.
+     *
+     * beam-tenancy publishes a RICH `tenants` schema — `create_tenants_table.php.stub` declares a
+     * NOT NULL `name`, a unique `slug` and `parent_tenant_id` — and ONLY this package's Tenant
+     * lists those in `getCustomColumns()`. Stancl's model lists `['id']` alone, so its
+     * `HasDataColumn` trait silently redirects every other attribute into the `data` JSON and the
+     * NOT NULL `name` column is never written:
+     *
+     *   insert into "tenants" ("id", "data", …) values (beam_demo, {"name":"Beam Demo",…})
+     *   → SQLSTATE[23502]: null value in column "name" violates not-null constraint
+     *
+     * That is this package's OWN DemoTenantSeeder failing against this package's OWN migration —
+     * measured 2026-08-30 at `~/Herd/tower`, where it had been failing on every seed run behind
+     * `beam:seed`'s then-unconditional exit 0. Of the three hosts installing beam-tenancy, the only
+     * one that worked was the one that had hand-written the binding.
+     *
+     * Applied in `packageBooted()` and ONLY when the value is still stancl's own default — a host
+     * that names any other model keeps it, last-writer-wins, exactly like the morph alias below.
+     * Set false to opt out entirely and own the binding yourself.
+     */
+    'bind_tenant_model' => env('BEAM_TENANCY_BIND_TENANT_MODEL', true),
+
     'system_tenant' => [
         'slug' => env('SPLICEWIRE_SYSTEM_TENANT_SLUG', 'system'),
         'name' => 'System',
