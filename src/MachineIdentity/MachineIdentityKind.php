@@ -11,17 +11,32 @@ namespace Splicewire\Beam\Tenancy\MachineIdentity;
  * vocabulary is open because the tiers are open — beam-tenancy ships the two it owns, tower ships
  * `broker` from its own provider, and a host ships whatever it runs.
  *
- * ## ⚠️ `abilities` is a declared slot with no values yet, and that is deliberate
+ * ## ⚠️ `abilities` has THREE states, not two — and the third is why this is nullable
  *
- * The list is the eventual authorization payload: what a holder of this kind may do in the tenant.
- * A sibling pass is measuring what actually belongs in it — every existing machine credential's real
- * ability set, read off the estate rather than guessed. Until that lands the two kinds this package
- * ships declare an EMPTY list, and empty means *not yet measured*, not *nothing permitted*.
+ * The original shape typed `abilities` as `list<string>` defaulting to `[]`, and documented the
+ * empty list as meaning *"not yet measured"*. That worked exactly as long as no kind's measured
+ * answer was genuinely "needs nothing" — and `system`'s is. Measured on the flagship: the System
+ * Account holds **zero tokens, zero roles, and is never an authenticated principal** — it exists
+ * only as an owner-of-record id on machine-written rows. Its correct ability list is empty, and
+ * under the old contract that was indistinguishable from "nobody has looked yet".
  *
- * **Do not invent ability strings to fill this in.** A plausible-looking ability string that nothing
- * enforces is worse than an empty list: the empty list is visibly unfinished, whereas a fabricated
- * one reads as a decision and will be trusted by the first reader who does not know it was a guess.
- * Nothing consults `abilities()` yet — the readers arrive with the values.
+ * So the states are now distinct by TYPE rather than by convention:
+ *
+ * | value | meaning |
+ * |---|---|
+ * | `null` (the default) | **UNMEASURED.** Nobody has established what this kind may do. Not a deny-all — a caller that reads this as an authorization answer is reading a hole as a decision. |
+ * | `[]` | **MEASURED: needs nothing.** Somebody looked, and the answer is that this kind authenticates nothing and requires no ability. A real, defensible deny-all. |
+ * | a non-empty list | measured, and these are the abilities. |
+ *
+ * {@see hasMeasuredAbilities()} is the discriminator, and {@see abilities()} deliberately returns
+ * `?array` rather than coalescing to `[]` — coalescing would re-collapse the two states at the exact
+ * seam that exists to keep them apart. A caller that wants a list must decide, in its own code, what
+ * an unmeasured kind means to it.
+ *
+ * **Still do not invent ability strings.** A plausible-looking ability string that nothing enforces
+ * is worse than `null`: `null` is visibly unfinished, whereas a fabricated list reads as a decision
+ * and will be trusted by the first reader who does not know it was a guess. Declare `[]` only when
+ * you have actually measured that nothing is needed, and say where you measured it.
  */
 class MachineIdentityKind
 {
@@ -29,31 +44,45 @@ class MachineIdentityKind
      * @param  string  $key  the `tenant_machine_identities.kind` discriminator — a bare key
      *                       (`sync`, `system`, `broker`), addressed under the registry's root
      * @param  string  $label  operator-facing name for the kind
-     * @param  list<string>  $abilities  what a holder of this kind may do. EMPTY on both kinds this
-     *                                   package ships — see the class docblock; a later pass fills
-     *                                   it from measurement, and inventing values here pre-empts it
+     * @param  list<string>|null  $abilities  what a holder of this kind may do. `null` (the default)
+     *                                        means UNMEASURED; `[]` means measured and needing
+     *                                        nothing. See the class docblock — the two are not the
+     *                                        same claim and must not be spelled the same way
      * @param  string|null  $description  what this kind of machine is, for an operator reading a
      *                                    grant they did not create
      */
     public function __construct(
         public readonly string $key,
         public readonly string $label,
-        public readonly array $abilities = [],
+        public readonly ?array $abilities = null,
         public readonly ?string $description = null,
     ) {}
 
     /**
-     * The abilities this kind declares.
+     * The abilities this kind declares, or `null` when nobody has measured them.
      *
-     * ⚠️ An empty array today means UNMEASURED, not "denies everything" — no caller may read a `[]`
-     * here as an authorization answer until the sibling pass supplies real values. There is
-     * deliberately no `permits()` helper yet, so that nothing can accidentally start enforcing an
-     * empty list as a deny-all.
+     * ⚠️ Returns `?array` on purpose. `[] ` and `null` are different answers — "measured: needs
+     * nothing" and "unmeasured" — and a `?? []` here would erase that distinction for every caller
+     * at once. Branch on {@see hasMeasuredAbilities()} first.
      *
-     * @return list<string>
+     * There is still deliberately no `permits()` helper: enforcement wants a decision about what an
+     * unmeasured kind means, and that decision belongs to the enforcing tier, not here.
+     *
+     * @return list<string>|null
      */
-    public function abilities(): array
+    public function abilities(): ?array
     {
         return $this->abilities;
+    }
+
+    /**
+     * Whether anyone has established this kind's ability set.
+     *
+     * True for a measured empty list as much as for a measured non-empty one — that is the whole
+     * point of the split.
+     */
+    public function hasMeasuredAbilities(): bool
+    {
+        return $this->abilities !== null;
     }
 }

@@ -133,9 +133,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * override `sync` declares it in config or registers it later, and does not have to fight this
      * package for the key.
      *
-     * ⚠️ Both shipped kinds declare an EMPTY `abilities` list. That is the sibling pass's slot, not
-     * an oversight and not a deny-all — see {@see MachineIdentityKind}. Do not fill it with invented
-     * ability strings to make it look finished.
+     * ## Both shipped kinds are now MEASURED, and they measured to different things
+     *
+     * `sync` carries a real list; `system` carries an explicitly empty one. Those are two different
+     * claims and {@see MachineIdentityKind} now spells them differently from `null`/UNMEASURED — see
+     * that class's table. Neither list is a guess: each entry below cites where it was read off the
+     * estate. Do not add an ability here that nothing enforces.
      */
     protected function registerMachineIdentityKinds(): void
     {
@@ -146,7 +149,31 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 ->register(new MachineIdentityKind(
                     key: 'sync',
                     label: 'Sync',
-                    abilities: [],
+                    // MEASURED, replacing the `['*']` the flagship's `RootUserSeeder` used to mint.
+                    // Each line is a route or resolver that actually reads it:
+                    //
+                    //  - `engine:consume` is the ONLY coarse gate on the loopback's two guarded
+                    //    routes (`AuthorizeEngineConsumption:28,53`, mounted at the flagship's
+                    //    `routes/tenant.php:573,599`). Without it the loopback 403s.
+                    //  - the `composition.*` four are the estate's own precedent for this exact
+                    //    principal: `EngineConsumerToken:79` already derives precisely those from
+                    //    `PermissionNamer` for the loopback token. The permission-cascade
+                    //    CredentialScope intersects principal permissions with token abilities, so
+                    //    a coarse-only token scopes to nothing and the composition policy denies.
+                    //  - the `fragment.*` four cover the connector paths the sync daemon drives.
+                    //  - `manage-schemas` covers the satellite schema path.
+                    abilities: [
+                        'engine:consume',
+                        'composition.view',
+                        'composition.create',
+                        'composition.update',
+                        'composition.delete',
+                        'fragment.view',
+                        'fragment.create',
+                        'fragment.update',
+                        'fragment.delete',
+                        'manage-schemas',
+                    ],
                     description: 'The federation sync daemon — the identity behind the estate\'s '
                         .'tenant sync pipeline. Historically seated on `tenant_users` as '
                         .'`role = \'service\'`, which is the squatting this table retires.',
@@ -154,9 +181,15 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 ->register(new MachineIdentityKind(
                     key: 'system',
                     label: 'System',
+                    // MEASURED EMPTY — "needs nothing", NOT "unmeasured". `system@app.splicewire.com`
+                    // (tower's `SystemAccountService:31`) holds zero tokens and zero roles and is
+                    // never an authenticated principal; it exists only as an owner-of-record id on
+                    // machine-written rows. `[]` is the correct, defensible answer here, and is
+                    // distinguishable from the `null` default by `hasMeasuredAbilities()`.
                     abilities: [],
                     description: 'The platform\'s own operator identity acting inside a tenant, as '
-                        .'distinct from any human operator\'s seat.',
+                        .'distinct from any human operator\'s seat. Never authenticates — it is an '
+                        .'owner-of-record for machine-written rows, which is why it needs nothing.',
                 ));
 
             // The HOST half. Absent config is a normal state, not an unconfigured one: a host that

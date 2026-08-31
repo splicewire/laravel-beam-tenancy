@@ -47,18 +47,59 @@ it('ships the two kinds beam-tenancy owns', function () {
 });
 
 /**
- * ⚠️ The abilities slot exists and is EMPTY, and empty means UNMEASURED.
+ * The abilities slot is MEASURED for both shipped kinds now — and this test is the gate the previous
+ * assertion asked a filling pass to come through and say so at.
  *
- * A sibling pass is measuring what belongs here from the estate's real credentials. This assertion
- * is deliberately pinned to `[]` so that a later pass filling it has to come through this test and
- * say so — and so that nobody quietly invents plausible ability strings in the meantime, which would
- * read as a decision and be trusted.
+ * ## The contract changed, because two different claims were spelled the same way
+ *
+ * The old shape typed `abilities` as `list<string>` defaulting to `[]` and documented `[]` as
+ * *"unmeasured"*. That held only until a kind's measured answer was genuinely "needs nothing" — and
+ * `system`'s is: `system@app.splicewire.com` holds zero tokens, zero roles, and is never an
+ * authenticated principal. Under the old spelling, "we looked and it needs nothing" and "nobody has
+ * looked" were the same value, so the honest answer was unrecordable.
+ *
+ * `null` is now the default and means UNMEASURED; `[]` means measured-and-needs-nothing.
+ * `hasMeasuredAbilities()` is the discriminator, and `abilities()` returns `?array` rather than
+ * coalescing — a `?? []` there would re-collapse the two states at the one seam that exists to keep
+ * them apart.
  */
-it('declares an abilities slot that is empty pending measurement', function () {
+it('distinguishes an UNMEASURED ability slot from a measured empty one', function () {
+    $unmeasured = new MachineIdentityKind(key: 'nobody-looked', label: 'Nobody Looked');
+    $measuredEmpty = new MachineIdentityKind(key: 'needs-nothing', label: 'Needs Nothing', abilities: []);
+
+    expect($unmeasured->abilities())->toBeNull()
+        ->and($unmeasured->hasMeasuredAbilities())->toBeFalse()
+        ->and($measuredEmpty->abilities())->toBe([])
+        ->and($measuredEmpty->hasMeasuredAbilities())->toBeTrue();
+});
+
+it('declares MEASURED abilities for both kinds beam-tenancy ships', function () {
     $registry = app(MachineIdentityKindRegistry::class);
 
-    expect($registry->get('sync')->abilities())->toBe([]);
-    expect($registry->get('system')->abilities())->toBe([]);
+    // `sync` — every entry is a gate that actually reads it: `engine:consume` is the only coarse gate
+    // on the loopback's two guarded routes; the `composition.*` four are what `EngineConsumerToken`
+    // already derives for this exact principal; `fragment.*` covers the connector paths;
+    // `manage-schemas` the satellite schema path. This replaced an implicit `['*']` on the
+    // `splicewire-sync` token, which under the permission-cascade CredentialScope meant no scope
+    // narrowing at all.
+    expect($registry->get('sync')->abilities())->toBe([
+        'engine:consume',
+        'composition.view',
+        'composition.create',
+        'composition.update',
+        'composition.delete',
+        'fragment.view',
+        'fragment.create',
+        'fragment.update',
+        'fragment.delete',
+        'manage-schemas',
+    ])->and($registry->get('sync')->hasMeasuredAbilities())->toBeTrue();
+
+    // `system` — measured EMPTY, which is a real answer and not a hole. The pairing of these two
+    // assertions is the whole point of the contract change: without `hasMeasuredAbilities()` the
+    // line below would be indistinguishable from "nobody has looked at `system` yet".
+    expect($registry->get('system')->abilities())->toBe([])
+        ->and($registry->get('system')->hasMeasuredAbilities())->toBeTrue();
 });
 
 /**
