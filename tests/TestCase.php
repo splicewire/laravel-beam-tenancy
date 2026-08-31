@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Tenancy\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
+use Rushing\Popcorn\Laravel\PopcornServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Splicewire\Beam\Seed\BeamSeedManifest;
@@ -28,6 +29,14 @@ class TestCase extends Orchestra
             // Measured here before the fix; same omission and mechanism as `splicewire/tower`.
             // api-surface-coherence tickets 84 / 85.
             LaravelDataServiceProvider::class,
+
+            // laravel-popcorn binds RegistryIndex as a SINGLETON, and testbench does NOT
+            // auto-discover it — requiring the package is not enough. Without it the index is
+            // auto-resolvable but UNSHARED, so every `describe()` lands on a throwaway and a
+            // registry-conformance assertion passes vacuously over an empty index
+            // (registry-kernel 27 D3). `MachineIdentityKindRegistryConformanceTest` pins that
+            // tripwire directly rather than trusting this line.
+            PopcornServiceProvider::class,
 
             BeamTenancyServiceProvider::class,
         ];
@@ -129,6 +138,27 @@ class TestCase extends Orchestra
             $table->timestamps();
 
             $table->primary(['tenant_id', 'user_id']);
+        });
+
+        // Mirrors create_tenant_machine_identities_table.php.stub (FKs omitted — sqlite in-memory,
+        // and the shape under test is the columns, not referential integrity).
+        //
+        // ⚠️ Carries NO `role` and NO `accepted_at`, exactly like the stub. That is not an
+        // abbreviation of the real table — it IS the real table's design, and a harness that added
+        // them "for symmetry" with `tenant_users` above would make the billing-exclusion property
+        // untestable and quietly licence someone to add them to the stub too.
+        Schema::create('tenant_machine_identities', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('tenant_id');
+            $table->uuid('user_id');
+            $table->string('kind');
+            $table->string('label')->nullable();
+            $table->timestamp('granted_at');
+            $table->timestamp('revoked_at')->nullable();
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['tenant_id', 'user_id', 'kind']);
         });
     }
 }

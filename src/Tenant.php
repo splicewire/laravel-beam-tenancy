@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Collection;
@@ -19,6 +20,7 @@ use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantInvitation;
+use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
@@ -955,6 +957,49 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         return $this->belongsToMany(config('auth.providers.users.model'), 'tenant_users')
             ->withPivot('role', 'invited_at', 'accepted_at', 'removed_at')
             ->withTimestamps();
+    }
+
+    /**
+     * The MACHINE identities granted entry to this tenant — sync daemons, brokers, engine consumers.
+     *
+     * The deliberate counterpart to {@see users()}, and the two must not be conflated. `users()` is
+     * the HUMAN membership pivot, whose `role` is `owner|admin|member`
+     * ({@see \Splicewire\Beam\Accounts\Enums\Role}); this is the machine axis that had been squatting
+     * in that column as `role = 'service'`. A machine is not a seat: it is never invited, never
+     * accepts, and must never be billed as one — which is why
+     * `tenant_machine_identities` has no `accepted_at` for a per-seat meter to find.
+     *
+     * A `hasMany` rather than a `belongsToMany`, and that is the point: the grant is a first-class
+     * row with its own surrogate key and its own model, not an unaddressable pivot. See
+     * {@see TenantMachineIdentity} for why `tenant_users` having no model is the underlying defect.
+     */
+    public function machineIdentities(): HasMany
+    {
+        return $this->hasMany(TenantMachineIdentity::class, 'tenant_id');
+    }
+
+    /**
+     * This tenant's live machine identity of a given kind, or null.
+     *
+     * The lookup that replaces `wherePivot('role', 'broker')->first()` and its siblings — the
+     * pattern that only ever worked because the machine axis was borrowed into the role column.
+     * Reading a kind here is reading a first-class grant, not decoding a role string.
+     *
+     * Revoked grants are excluded: a revoked identity is not an identity, and every caller of this
+     * is asking "may this machine act", never "did it ever exist".
+     *
+     * ⚠️ `$kind` is NOT validated against
+     * {@see \Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry} here, on purpose.
+     * An unregistered kind simply has no rows, which is the same answer as a registered kind with no
+     * grant — whereas throwing would make a lookup's success depend on provider boot order, and
+     * would break exactly the cross-host case the registry is open for.
+     */
+    public function machineIdentityFor(string $kind): ?TenantMachineIdentity
+    {
+        return $this->machineIdentities()
+            ->where('kind', $kind)
+            ->whereNull('revoked_at')
+            ->first();
     }
 
     // --- beam-accounts TeamContract over the app's own tables (FC-12) ------

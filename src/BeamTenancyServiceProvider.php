@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Tenancy;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
+use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
+use Rushing\Popcorn\Registries\RegistryIndex;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
@@ -26,7 +28,12 @@ use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
+use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
+use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
+use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
+use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
+use Stancl\Tenancy\Listeners\UpdateSyncedResource;
 
 /**
  * The PURE-tenancy substrate the whole estate FKs to: `tenants` (stancl core) + `domains`,
@@ -55,6 +62,9 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     public function register(): void
     {
         parent::register();
+
+        $this->registerMachineIdentityKinds();
+        $this->registerMachineIdentityAwareSyncListener();
 
         $this->app->singleton(IsolatedDatabaseDestination::class, function ($app) {
             $config = $app['config']->get('beam.tenancy.isolated_database', []);
@@ -108,6 +118,84 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         });
     }
 
+    /**
+     * Bind {@see MachineIdentityKindRegistry} and seed the two kinds this package owns.
+     *
+     * REGISTER phase, deliberately, and for the same reason beam-lineage binds its kind registry
+     * there: tower registers `broker` and a host registers its own from their BOOT phases, and every
+     * provider's register phase completes before any boot phase runs. Binding here is what guarantees
+     * a later registration has a registry to land in, whatever the provider order.
+     *
+     * The host's own kinds arrive through a {@see ConfigRegistrar} over
+     * `beam.tenancy.machine_identity.kinds`, attached inside the singleton so config is read at
+     * resolve time rather than frozen at provider construction. `Filled` fills at attach and
+     * `OnDuplicate::Supersede` means a later hand-registration wins — so a host that wants to
+     * override `sync` declares it in config or registers it later, and does not have to fight this
+     * package for the key.
+     *
+     * ⚠️ Both shipped kinds declare an EMPTY `abilities` list. That is the sibling pass's slot, not
+     * an oversight and not a deny-all — see {@see MachineIdentityKind}. Do not fill it with invented
+     * ability strings to make it look finished.
+     */
+    protected function registerMachineIdentityKinds(): void
+    {
+        $this->app->singleton(MachineIdentityKindRegistry::class, function ($app) {
+            $registry = new MachineIdentityKindRegistry;
+
+            $registry
+                ->register(new MachineIdentityKind(
+                    key: 'sync',
+                    label: 'Sync',
+                    abilities: [],
+                    description: 'The federation sync daemon — the identity behind the estate\'s '
+                        .'tenant sync pipeline. Historically seated on `tenant_users` as '
+                        .'`role = \'service\'`, which is the squatting this table retires.',
+                ))
+                ->register(new MachineIdentityKind(
+                    key: 'system',
+                    label: 'System',
+                    abilities: [],
+                    description: 'The platform\'s own operator identity acting inside a tenant, as '
+                        .'distinct from any human operator\'s seat.',
+                ));
+
+            // The HOST half. Absent config is a normal state, not an unconfigured one: a host that
+            // runs no machines of its own declares nothing and the registry holds only the two above.
+            $registry->attach(new ConfigRegistrar(
+                (array) ($app['config']->get('beam.tenancy.machine_identity.kinds') ?? []),
+                'beam.tenancy.machine_identity.kinds',
+            ));
+
+            return $registry;
+        });
+    }
+
+    /**
+     * ⛔ Swap stancl's `UpdateSyncedResource` for the machine-identity-aware subclass.
+     *
+     * This is the single most load-bearing line of the machine-identity split. Stancl's listener
+     * re-attaches a missing tenant↔user pivot mapping with NO attributes
+     * (`vendor/stancl/tenancy/src/Listeners/UpdateSyncedResource.php:73-81`), so `role` takes the
+     * column default `'member'`. {@see \Splicewire\Beam\Tenancy\Models\TenantUser} is `Syncable`, and
+     * every machine-provisioning path ends in a `TenantUser::updateOrCreate` inside `$tenant->run()`.
+     * Without this binding, the first sync after a machine row leaves `tenant_users` puts it straight
+     * back as an ordinary-looking `member` seat — parseable by `Role`, indistinguishable from a human,
+     * and strictly worse than the `service` it replaced, which at least announced itself.
+     *
+     * Bound as an interface-style container override rather than by editing any host's `$listen` map:
+     * hosts list `Stancl\Tenancy\Listeners\UpdateSyncedResource::class` by class-string (the
+     * flagship's `TenancyServiceProvider:117` does), and Laravel resolves a class-string listener
+     * through the container. So every host gets the guard with no host edit, and no host can forget
+     * it — which matters because forgetting it is silent.
+     *
+     * See {@see MachineIdentityAwareUpdateSyncedResource} for why it fails OPEN on a host that has
+     * not published the new table.
+     */
+    protected function registerMachineIdentityAwareSyncListener(): void
+    {
+        $this->app->bind(UpdateSyncedResource::class, MachineIdentityAwareUpdateSyncedResource::class);
+    }
+
     public function configurePackage(Package $package): void
     {
         $package
@@ -125,6 +213,11 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 'create_domains_table',
                 'create_tenant_users_table',
                 'create_tenant_invitations_table',
+                // The MACHINE half of "who may enter this tenant" — listed after `create_tenants_table`
+                // and the central `users` substrate it FKs, exactly like `create_tenant_users_table`
+                // beside it. See the stub's own docblock for why it carries no `role` and no
+                // `accepted_at`, and why that absence is what keeps machines out of per-seat billing.
+                'create_tenant_machine_identities_table',
             ]);
     }
 
@@ -235,6 +328,27 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 BeamTenancyMigrationsAudit::class,
+            );
+
+            // ADVISORY by construction — the audit itself can only ever emit Pass or Warn, never
+            // Fail, and `gate` stays false so it cannot hold a doctor run's floor. "Is there a
+            // machine-shaped row in this host's data" is the textbook host-dependent question, and a
+            // host carrying those rows is a host awaiting a data migration, not a broken one. See
+            // {@see MachineIdentityOnMembershipPivotAudit} for the estate precedent this follows.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                MachineIdentityOnMembershipPivotAudit::class,
+            );
+        }
+
+        // Declaring and indexing are two acts (registry-kernel 21 D1). MachineIdentityKindRegistry
+        // DECLARES `beam.tenancy.machine-identity.kinds` via its attribute; this is where that root
+        // becomes routable. Guarded on the index being bound so a host composing beam-tenancy without
+        // laravel-popcorn's provider still boots.
+        if ($this->app->bound(RegistryIndex::class)) {
+            $this->app->make(RegistryIndex::class)->describe(
+                $this->app->make(MachineIdentityKindRegistry::class),
+                by: self::class,
             );
         }
 

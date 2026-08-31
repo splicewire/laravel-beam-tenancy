@@ -1,0 +1,91 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+use Rushing\SchemaConvergence\ConvergentTable;
+
+/**
+ * Publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE) — re-stamped to the install
+ * moment via `configurePackage()`'s `->hasMigrations([...])` on `vendor:publish
+ * --tag=beam-tenancy-migrations` / `splicewire:beam:install`; the host runs it.
+ *
+ * CENTRAL ONLY, same as `tenant_users` beside it — and for the same reason: this table spans
+ * users × tenants and FKs both central substrates, so no single tenant schema could hold it.
+ *
+ * ## What this table IS
+ *
+ * The machine half of "who may enter this tenant". `service` was never a membership role — it was a
+ * MACHINE-IDENTITY AXIS wearing the `tenant_users.role` column, which is a human vocabulary
+ * (`owner|admin|member`, {@see \Splicewire\Beam\Accounts\Enums\Role}). A sync daemon, a broker, an
+ * engine consumer are not seats; they are grants to a program. They get their own relation here, and
+ * `Role` goes back to meaning what it says.
+ *
+ * ## ⚠️ The ABSENT columns are the design, not an oversight
+ *
+ * `role`, `invited_at`, `accepted_at` and `removed_at` are deliberately NOT here. **Do not add them
+ * for symmetry with `tenant_users`.**
+ *
+ * - There is no `role`, because that is the whole point: a machine's authority is its `kind` plus
+ *   the abilities that kind declares ({@see \Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind}),
+ *   never a human seat rank.
+ * - There is no invitation lifecycle, because it is meaningless for a machine. Nothing invites a
+ *   daemon and nothing waits for it to accept.
+ * - The missing `accepted_at` is **load-bearing for billing**. `laravel-beam-commerce`'s
+ *   `Billing/Components/PerSeatFees.php:50-59` counts seats by filtering on `accepted_at` being
+ *   present. A machine row that has no such column cannot be counted by a per-seat meter that reads
+ *   one — so billing exclusion here is STRUCTURAL rather than a filter somebody has to remember to
+ *   write. Adding `accepted_at` back would silently start billing customers for their daemons.
+ *
+ * `granted_at` is therefore NOT a renamed `accepted_at`. It records when the grant was made, by the
+ * grantor, with no counterparty — which is the only lifecycle a machine identity has. `revoked_at`
+ * ends it and `last_used_at` is telemetry.
+ *
+ * ## The surrogate key
+ *
+ * `id` is a real uuid primary key. `tenant_users` has NO surrogate key — its primary is the
+ * composite `(tenant_id, user_id)` — which is why nothing in the estate can point AT a membership
+ * row, and part of why that pivot never grew a model. This table does not repeat that.
+ *
+ * `unique(['tenant_id','user_id','kind'])` is the real identity constraint: one user may hold
+ * several kinds of machine identity in one tenant (a sync grant and a broker grant are different
+ * grants), but not the same kind twice.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        ConvergentTable::named('tenant_machine_identities')
+            ->define(function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('tenant_id');
+                $table->uuid('user_id');
+
+                // The machine-identity kind — `sync`, `system`, tower's `broker`, a host's own.
+                // An OPEN vocabulary held in a popcorn registry, deliberately not an enum: an enum
+                // here would re-create the exact ceiling this table exists to remove.
+                $table->string('kind');
+
+                // Operator-facing name for one particular grant ("nightly catalog sync"), where the
+                // kind alone is not enough to tell two grants apart. Never authorization input.
+                $table->string('label')->nullable();
+
+                // NOT `accepted_at`. See the class docblock — this name is what keeps the row
+                // structurally invisible to a per-seat billing meter.
+                $table->timestamp('granted_at');
+                $table->timestamp('revoked_at')->nullable();
+                $table->timestamp('last_used_at')->nullable();
+                $table->timestamps();
+
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
+                $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
+                $table->unique(['tenant_id', 'user_id', 'kind']);
+            })
+            ->assert();
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('tenant_machine_identities');
+    }
+};

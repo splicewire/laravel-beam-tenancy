@@ -31,6 +31,48 @@ return [
     ],
 
     /*
+     * MACHINE IDENTITIES — the axis that used to squat in `tenant_users.role` as `service`.
+     *
+     * A machine (a sync daemon, a broker, an engine consumer) is not a team member. It is never
+     * invited, never accepts, and must never be billed as a seat. `tenant_users.role` is a HUMAN
+     * vocabulary — `owner|admin|member`, `Splicewire\Beam\Accounts\Enums\Role` — so a `service` value
+     * sitting in it was a category error with real consequences: `Tenant::memberRole()` raises a
+     * ValueError on it, and nothing anywhere could tell a program's grant from a person's seat.
+     *
+     * Machines now get their own relation, `tenant_machine_identities`, which deliberately carries no
+     * `role` and no `accepted_at`. That second absence is load-bearing: beam-commerce's per-seat
+     * meter counts seats by filtering on `accepted_at`, so a table without the column cannot be
+     * billed by it. Billing exclusion is structural rather than a filter someone has to remember.
+     */
+    'machine_identity' => [
+        /*
+         * The HOST's own machine-identity kinds, merged into
+         * `MachineIdentityKindRegistry` (root `beam.tenancy.machine-identity.kinds`) by a popcorn
+         * ConfigRegistrar at boot.
+         *
+         * An OPEN registry rather than an enum, because a closed vocabulary here would rebuild the
+         * exact ceiling this whole change removes — tower could not add `broker` without editing this
+         * package, and a host could not add its own kind at all. So the tiers that own kinds ship
+         * them: beam-tenancy registers `sync` and `system` from its provider, tower registers
+         * `broker` from its, and a host declares whatever it runs right here.
+         *
+         * Keys are bare (`courier`, `warehouse-feed`); values are
+         * `Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind` instances. A key declared
+         * here SUPERSEDES a package's registration of the same key, which is the correct precedence:
+         * the host is the last writer and wins.
+         *
+         * EMPTY is the normal default, not an unconfigured state — a host that runs no machines of
+         * its own declares nothing and the registry holds only the two beam-tenancy ships.
+         *
+         * ⚠️ A `MachineIdentityKind` carries an `abilities` slot that is currently EMPTY on every
+         * kind this package ships, pending a measurement pass. Empty means UNMEASURED, not
+         * "denies everything", and nothing reads it yet. Do not populate it with guessed ability
+         * strings — an invented value that nothing enforces reads as a decision and will be trusted.
+         */
+        'kinds' => [],
+    ],
+
+    /*
      * The demo TENANT — the tenancy-side counterpart to beam-accounts' demo TEAM.
      *
      * beam-accounts seats its role-differentiated demo roster (demo-owner / demo-admin /
