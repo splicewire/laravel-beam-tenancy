@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
-use Rushing\Popcorn\Registries\RegistryIndex;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
@@ -371,17 +370,6 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 MachineIdentityOnMembershipPivotAudit::class,
-            );
-        }
-
-        // Declaring and indexing are two acts (registry-kernel 21 D1). MachineIdentityKindRegistry
-        // DECLARES `beam.tenancy.machine-identity.kinds` via its attribute; this is where that root
-        // becomes routable. Guarded on the index being bound so a host composing beam-tenancy without
-        // laravel-popcorn's provider still boots.
-        if ($this->app->bound(RegistryIndex::class)) {
-            $this->app->make(RegistryIndex::class)->describe(
-                $this->app->make(MachineIdentityKindRegistry::class),
-                by: self::class,
             );
         }
 
