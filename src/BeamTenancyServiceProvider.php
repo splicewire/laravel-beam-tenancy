@@ -2,8 +2,6 @@
 
 namespace Splicewire\Beam\Tenancy;
 
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
@@ -11,12 +9,10 @@ use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
 use Rushing\Popcorn\Registries\RegistryIndex;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
-use Splicewire\Beam\Accounts\Data\InvitationData;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
-use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Provision\Gcp\WorkloadIdentityCredentialResolver;
 use Splicewire\Beam\Provision\Tofu\CabTokenMinter;
@@ -36,14 +32,13 @@ use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
-use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
 use Stancl\Tenancy\Listeners\UpdateSyncedResource;
 
 /**
  * The PURE-tenancy substrate the whole estate FKs to: `tenants` (stancl core) + `domains`,
- * `tenant_users`, `tenant_invitations`. Each create is squashed pre-prod (no deployed data to
+ * `tenant_users`. Each create is squashed pre-prod (no deployed data to
  * preserve migration history for) with its own additive columns folded straight in
  * (`tenants.parent_tenant_id`, `tenant_users.removed_at`, `domains.is_primary`) — see each stub's
  * own docblock for what it carries. Billing identity (Cashier's Stripe columns) moved OFF `tenants`
@@ -251,7 +246,6 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 'create_tenants_table',
                 'create_domains_table',
                 'create_tenant_users_table',
-                'create_tenant_invitations_table',
                 // The MACHINE half of "who may enter this tenant" — listed after `create_tenants_table`
                 // and the central `users` substrate it FKs, exactly like `create_tenant_users_table`
                 // beside it. See the stub's own docblock for why it carries no `role` and no
@@ -325,7 +319,6 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         Relation::morphMap(['tenant' => Tenant::class]);
 
         $this->registerSharedMigrationsPath();
-        $this->bootInvitationAuthorization();
         $this->bootFrameResources();
 
         // Join beam-core's bypass/redundancy/house-style audit sweeps: contribute this package's HTTP
@@ -428,8 +421,16 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * an empty/missing directory is a no-op, and pushing onto an unread config key is harmless.
      */
     /**
-     * Register this package's Frame/particle resources — the neutral `tenants` list (scanned off its
-     * attribute) plus the imperative `tenant-invitations` declaration below.
+     * Register this package's Frame/particle resources — the neutral `tenants` list, scanned off its
+     * attribute.
+     *
+     * ⚠️ It used to also register an imperative `tenant-invitations` declaration, and that key existed
+     * for exactly one reason: `splicewire/laravel-beam-accounts` already owned `invitations` against a
+     * DIFFERENT model on a different table, the registry is last-wins by key, and an operation's subject
+     * must not be a fact about provider order. There is one invitation model now
+     * ({@see \Splicewire\Beam\Accounts\Models\Invitation}, whose `team_id` holds a `TeamContract` key
+     * rather than a `beam_teams` row), so the key is not contested and the second declaration has
+     * nothing left to disambiguate. The operations that resolved through it declare `invitations`.
      *
      * ## Registers UNCONDITIONALLY, and the direct call is the point.
      *
@@ -472,96 +473,6 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // `beam.core.particle.classes` gets the same registration twice and the same result.
         $this->app->make(AttributedParticleDiscovery::class)
             ->discover(paths: [__DIR__.'/Data']);
-
-        $this->registerTenantInvitationsResource();
-    }
-
-    /**
-     * The `tenant-invitations` particle resource — this package's own {@see TenantInvitation} rows, and
-     * the SUBJECT declaration the operations hanging off it resolve through.
-     *
-     * ## Why the key is not `invitations`
-     *
-     * `splicewire/laravel-beam-accounts` already declares `invitations` on its own
-     * `Splicewire\Beam\Accounts\Models\Invitation` (table `beam_invitations`), and a host may register a
-     * third declaration under that key — the flagship does, imperatively, pointing it at THIS model for
-     * the Frame transport, and the registry is last-wins by key. Two different models behind one string
-     * is exactly the conflation an operation must not inherit: an op declaring `resource: 'invitations'`
-     * would resolve its `{id}` against whichever declaration happened to register last in the host it
-     * landed in. A distinct key is what makes the subject a fact about the declaration rather than about
-     * provider order.
-     *
-     * ## Why imperative rather than `#[ParticleResource]`
-     *
-     * The attribute goes on a class, and the read Data class here is beam-accounts'
-     * {@see InvitationData} — already annotated, for the OTHER key. That is the doctrine's own listed
-     * reason for the imperative tier ("the Data class is one you cannot annotate"), and the `scope`
-     * closure below is a non-constant expression besides.
-     *
-     * ## The `scope` closure IS the gate the operations used to hand-roll
-     *
-     * `tenant_id = tenant()` + `whereNull(accepted_at)` is verbatim the
-     * `where(...)->whereNull('accepted_at')->firstOrFail()` `TenantInvitationController::resend()` wrote
-     * out, and {@see \Splicewire\Beam\Particle\Subject\RecordSubject} applies it to every operation that
-     * resolves through this resource (ADR-0156 §83's row gate, not CRUD-only). Without the declaration
-     * the subject resolver falls back to a bare `TenantInvitation::findOrFail($id)` — no tenant scope, no
-     * pending check — so this registration is load-bearing rather than decorative.
-     *
-     * ⚠️ Deliberately NOT framed and NOT mounted: `frame: false` keeps it out of the Frame manifest
-     * (where the host's `invitations` declaration already serves this model), and no route file mounts
-     * its CRUD verbs. Registering is not mounting; a `composer require` must never mint a URL.
-     */
-    protected function registerTenantInvitationsResource(): void
-    {
-        $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
-            key: 'tenant-invitations',
-            backing: TenantInvitation::class,
-            data: InvitationData::class,
-            // No data-filters registration exists for this key, and `filterable` defaults to TRUE — an
-            // unregistered filterable resource throws on its first index request.
-            filterable: false,
-            project: fn (TenantInvitation $invitation): InvitationData => InvitationData::project($invitation),
-            scope: fn (Builder $query): Builder => $query
-                ->where('tenant_id', tenant()?->getKey())
-                ->whereNull('accepted_at'),
-            readOnly: true,
-            showable: false,
-            frame: false,
-        ));
-    }
-
-    /**
-     * `manageTenantInvitations` — the ability every operation on a {@see TenantInvitation} declares.
-     *
-     * ## It exists because the ability the estate already had could not be declared
-     *
-     * beam-accounts' `manageInvitations` (owner|admin, the graduated tier of the membership axis) takes a
-     * `TeamContract` — the TENANT — as its subject. A particle operation's `ability:` is checked against
-     * the subject the operation RESOLVED, which here is the invitation, and `abilityModel:` cannot bridge
-     * that: a class-string is passed to the Gate verbatim (so `Tenant::class` reaches
-     * `MembershipPolicy::manageInvitations()` as a string and TypeErrors), and `false` routes to the
-     * subject-free entitlement plane, where `entitlement:manageInvitations` is not defined and therefore
-     * DENIES. Declaring nothing was the third option and is the residue this estate is burning down.
-     *
-     * So the ability is defined here, on the invitation, and DELEGATES — it is a re-subjecting of
-     * beam-accounts' check, not a second definition of it. The outcome is identical by construction: the
-     * invitation's own tenant is the team asked about, and the resource `scope` above pins that to the
-     * ambient tenant on every mount that has one.
-     *
-     * ⚠️ `Gate::define`, deliberately NOT `Gate::policy(TenantInvitation::class, …)`. Giving this model a
-     * policy is not additive: `Gate::getPolicyFor()` becoming non-null routes EVERY ability asked about a
-     * `TenantInvitation` — including the `create`/`delete` the Frame write path asks about the host's
-     * `invitations` resource — into a policy class that does not define them, which resolves to a denial.
-     * A named ability has no blast radius: nothing else in the estate spells this word.
-     */
-    protected function bootInvitationAuthorization(): void
-    {
-        Gate::define(
-            'manageTenantInvitations',
-            fn (?Authenticatable $user, TenantInvitation $invitation): bool => $user !== null
-                && $invitation->tenant !== null
-                && Gate::forUser($user)->allows('manageInvitations', $invitation->tenant),
-        );
     }
 
     /**

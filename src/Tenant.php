@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
+use Splicewire\Beam\Accounts\Models\Invitation;
 use Splicewire\Beam\Enums\LlmTask;
 use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\CentralActivityLog;
@@ -19,7 +20,6 @@ use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
-use Splicewire\Beam\Tenancy\Models\TenantInvitation;
 use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
@@ -1031,7 +1031,35 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /** Pending (unaccepted) invitations for this tenant. */
     public function invitations()
     {
-        return $this->hasMany(TenantInvitation::class)->whereNull('accepted_at');
+        // beam-accounts' own `Invitation`, on the explicit `team_id` foreign key. There is no
+        // `TenantInvitation` any more: that model existed only because `beam_invitations.team_id` was a
+        // bigint FK into `beam_teams`, so a string-keyed `Tenant` could implement `TeamContract` and
+        // still not be nameable by an invitation. The column is a `TeamContract` key now, so the
+        // packaged model serves this case and the fork is gone.
+        //
+        // ⚠️ The FK went with it — a foreign key names one parent table and this column's parent is
+        // whatever the host resolved. Cascade-on-tenant-delete is therefore this model's job, not the
+        // database's; see the `deleting` hook.
+        return $this->hasMany(Invitation::class, 'team_id')->whereNull('accepted_at');
+    }
+
+    /**
+     * Replace the `tenant_invitations.tenant_id` cascade the retired table used to carry.
+     *
+     * ⚠️ This is the one thing lost by making `beam_invitations.team_id` a `TeamContract` key instead
+     * of a foreign key, and it is replaced deliberately rather than dropped: a deleted tenant that
+     * leaves pending invitations behind leaves live bearer tokens naming a workspace that no longer
+     * exists. Every OTHER read is already safe — `invitations()` and the resource `scope` both filter
+     * by the current team — so this is about the rows, not about the reads.
+     *
+     * Unfiltered by `accepted_at` on purpose, unlike the relation above: the accepted ones are the
+     * historical rows, and the FK deleted those too.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $tenant): void {
+            Invitation::query()->where('team_id', (string) $tenant->getKey())->delete();
+        });
     }
 
     /**
