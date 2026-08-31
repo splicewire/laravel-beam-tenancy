@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Rushing\Doctor\DoctorStatus;
 use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
@@ -128,4 +129,78 @@ it('lets a host in the bad state boot', function () {
 
     expect(app()->make(MachineIdentityOnMembershipPivotAudit::class))
         ->toBeInstanceOf(MachineIdentityOnMembershipPivotAudit::class);
+});
+
+/**
+ * ⛔ realm-and-floor-reconciliation, defect 2 — the pin, proven by a host where it MATTERS.
+ *
+ * Every test above runs in a harness whose central connection and default connection are the same
+ * object (`testing`), so they cannot tell a pinned read from an unpinned one — which is exactly how the
+ * unpinned read survived. This one separates them: the seats live on a `central` connection the host
+ * declares through stancl's own `tenancy.database.central_connection`, and the ambient default carries a
+ * pivot that is empty and clean. An unpinned reader sees nothing and reports a Pass. The audit must Warn.
+ *
+ * This is the **database-per-tenant** host in miniature, which is the topology the pin is for. It is
+ * NOT what this estate runs: here `Splicewire\Beam\Tenancy\PostgreSQLSchemaManager` sets the tenant
+ * `search_path` to `"$tenantSchema,public"` on purpose, so a central-only table falls through to
+ * `public` and the unpinned read worked. Give a host a separate database per tenant and there is no
+ * shared `public` to fall through to: `tenant_users` is not on a different connection, it is absent.
+ */
+it('reads the declared central connection, not the ambient default', function () {
+    $path = sys_get_temp_dir().'/beam-tenancy-central-'.getmypid().'-'.bin2hex(random_bytes(6)).'.sqlite';
+    touch($path);
+
+    config(['database.connections.central' => ['driver' => 'sqlite', 'database' => $path, 'prefix' => '']]);
+    config(['tenancy.database.central_connection' => 'central']);
+
+    Schema::connection('central')->create('tenant_users', function ($table) {
+        $table->string('tenant_id');
+        $table->uuid('user_id');
+        $table->string('role')->default('member');
+        $table->timestamps();
+        $table->primary(['tenant_id', 'user_id']);
+    });
+
+    DB::connection('central')->table('tenant_users')->insert([
+        'tenant_id' => 'acme',
+        'user_id' => (string) Str::uuid(),
+        'role' => 'service',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    // The default connection's pivot is real, reachable and spotless — so a reader that resolves the
+    // ambient default reports a clean Pass and the assertions below fail. That is the point of the test.
+    expect(DB::table('tenant_users')->count())->toBe(0);
+
+    $findings = (new MachineIdentityOnMembershipPivotAudit)->run();
+
+    expect($findings[0]->status)->toBe(DoctorStatus::Warn);
+    expect($findings[0]->detail)->toContain('service');
+
+    @unlink($path);
+});
+
+/**
+ * The other half of the seam, and the half that decides whether this change is safe to ship: a host that
+ * names a central connection it does not define must NOT make the audit go blind.
+ *
+ * A literal `DB::connection('central')` would throw here, be swallowed by the class's catch-all, and
+ * report a self-describing Pass — an audit reporting green because it never ran, which is this estate's
+ * recurring defect class. {@see \Splicewire\Beam\Tenancy\Support\TenancyConnections::central()} answers
+ * `null` for a dangling name, so the read lands on the connection the caller would have used anyway.
+ */
+it('still detects when the host names a central connection it never defined', function () {
+    plantMachineShapedSeat('service');
+
+    // Set AFTER planting, deliberately: stancl resolves its own Tenant model off this same key, so a
+    // dangling value breaks tenant creation before the audit is ever reached. The claim under test is
+    // narrower than "a host can run this way" — it is that THIS audit degrades to the default connection
+    // instead of to a silent pass.
+    config(['tenancy.database.central_connection' => 'no_such_connection']);
+
+    $findings = (new MachineIdentityOnMembershipPivotAudit)->run();
+
+    expect($findings[0]->status)->toBe(DoctorStatus::Warn);
+    expect($findings[0]->detail)->toContain('service');
 });

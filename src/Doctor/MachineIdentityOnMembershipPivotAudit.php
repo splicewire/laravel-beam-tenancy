@@ -2,11 +2,14 @@
 
 namespace Splicewire\Beam\Tenancy\Doctor;
 
+use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Rushing\Doctor\DoctorAudit;
 use Rushing\Doctor\Finding;
 use Splicewire\Beam\Accounts\Enums\Role;
+use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 use Throwable;
 
 /**
@@ -40,6 +43,46 @@ class MachineIdentityOnMembershipPivotAudit implements DoctorAudit
     public const CHECK = 'tenancy.machine-identity-on-membership-pivot';
 
     /**
+     * ## ⚠️ `tenant_users` is CENTRAL, and this audit used to read it with no pin at all
+     * Every read below goes through {@see TenancyConnections::central()} rather than the ambient default,
+     * which is the defect realm-and-floor-reconciliation opened this file for. A bare
+     * `DB::table('tenant_users')` did resolve correctly at this estate, and not by accident: we are
+     * schema-per-tenant on ONE Postgres and {@see \Splicewire\Beam\Tenancy\PostgreSQLSchemaManager}
+     * deliberately sets the tenant `search_path` to `"$tenantSchema,public"`, so a central-only table
+     * falls THROUGH to `public` while a table present in both resolves to the tenant copy. Measured
+     * 2026-08-30: inside an initialized tenant context with `database.default` set to `tenant`, the
+     * unpinned read still returned all 42 central rows.
+     *
+     * What it is not is portable. On a **database-per-tenant** host there is no shared `public` to fall
+     * through to, so the same line asks a database with no such table and this audit reports "no
+     * membership pivot" on a host that has one — a check going silent, which is the failure mode this
+     * estate pays for most often.
+     *
+     * It is NOT routed through {@see \Splicewire\Beam\Tenancy\Models\TenantMembership}, which holds
+     * the literal `central` pin and its `@central-floor` citation. That was tried and reverted: this
+     * package's harness names its only sqlite connection `testing` and defines no `central`, so the model
+     * route makes the schema probe answer "no such table" and the audit degrades to a self-describing
+     * pass — three of these tests flip Warn → Pass. An audit that stops detecting while still reporting
+     * green is strictly worse than the portability bug it was meant to close. The resolver degrades the
+     * other way: unknown split ⇒ the default connection, which is what a single-database host means.
+     */
+    private function connection(): ?string
+    {
+        return TenancyConnections::central();
+    }
+
+    /** The central query builder for a table, or the default connection's where no split is declared. */
+    private function table(string $table): Builder
+    {
+        return DB::connection($this->connection())->table($table);
+    }
+
+    private function schema(): SchemaBuilder
+    {
+        return Schema::connection($this->connection());
+    }
+
+    /**
      * @return list<Finding>
      */
     public function run(): array
@@ -61,7 +104,7 @@ class MachineIdentityOnMembershipPivotAudit implements DoctorAudit
 
     private function measure(): Finding
     {
-        if (! Schema::hasTable('tenant_users')) {
+        if (! $this->schema()->hasTable('tenant_users')) {
             return Finding::pass(
                 self::CHECK,
                 'This host has no `tenant_users` table, so there is no membership pivot to measure.',
@@ -116,11 +159,11 @@ class MachineIdentityOnMembershipPivotAudit implements DoctorAudit
      */
     private function machineIdentitySeats(): int
     {
-        if (! Schema::hasTable('tenant_machine_identities')) {
+        if (! $this->schema()->hasTable('tenant_machine_identities')) {
             return 0;
         }
 
-        return DB::table('tenant_users')
+        return $this->table('tenant_users')
             ->join('tenant_machine_identities', function ($join) {
                 $join->on('tenant_users.tenant_id', '=', 'tenant_machine_identities.tenant_id')
                     ->on('tenant_users.user_id', '=', 'tenant_machine_identities.user_id');
@@ -138,11 +181,11 @@ class MachineIdentityOnMembershipPivotAudit implements DoctorAudit
      */
     private function rolesOutsideTheHumanVocabulary(): array
     {
-        if (! Schema::hasColumn('tenant_users', 'role')) {
+        if (! $this->schema()->hasColumn('tenant_users', 'role')) {
             return [];
         }
 
-        $rows = DB::table('tenant_users')
+        $rows = $this->table('tenant_users')
             ->select('role', DB::raw('count(*) as seats'))
             ->whereNotIn('role', Role::values())
             ->groupBy('role')

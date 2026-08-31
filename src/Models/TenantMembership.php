@@ -30,22 +30,36 @@ use Splicewire\Beam\Tenancy\Tenant;
  * What the relation cannot serve is a read that is **not scoped to one tenant instance** — a
  * host-wide sweep with no `Tenant` in hand — and that is the gap this model fills.
  *
- * ## ⚠️ One such reader is knowingly still on the default connection
- * {@see \Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit} reaches this table
- * through a bare `DB::table('tenant_users')` plus a bare `Schema::hasTable()` — **no connection pin
- * at all**, which is why it is the one `tenant_users` reader that never appears in the
- * central-pin census. It survives only because this estate runs schema-per-tenant on ONE Postgres
- * database, so the `public` search_path catches it: measured 2026-08-30, inside an initialized
- * tenant context with `database.default` set to `tenant`, the bare read still returned all 42
- * central rows. On a database-per-tenant host the same line asks a schema that has no such table.
+ * ## ✅ The one unpinned reader is now pinned — through a resolver, not through this model
+ * {@see \Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit} used to reach this
+ * table through a bare `DB::table('tenant_users')` plus a bare `Schema::hasTable()` — **no
+ * connection pin at all**, which is why it was the one `tenant_users` reader that never appeared in
+ * the central-pin census. It resolved correctly here, and by design rather than by luck: this estate
+ * runs schema-per-tenant on ONE Postgres, and {@see \Splicewire\Beam\Tenancy\PostgreSQLSchemaManager}
+ * overrides stancl's own manager to set the tenant `search_path` to `"$tenantSchema,public"`, so a
+ * central-only table like this one falls through to `public` (while a table present in both schemas
+ * resolves to the tenant copy). Measured 2026-08-30: inside an initialized tenant context with
+ * `database.default` set to `tenant`, the bare read still returned all 42 central rows. On a
+ * **database-per-tenant** host there is no shared `public` to fall through to, and the same line
+ * asks a database that has no such table.
  *
- * It was NOT moved onto this model, and the reason is worth recording rather than retrying blind:
- * this package's own test harness (`tests/TestCase.php`) names its single sqlite connection
- * `testing` and defines no `central` connection at all, so routing the audit here makes its schema
- * probe answer "no such table" and the audit degrades to a self-describing pass — three of its
- * tests flip from Warn to Pass. Making that read honest needs the harness to model a real central
- * connection, which is a separate change with its own blast radius. The defect is real, latent, and
- * filed rather than smuggled in here.
+ * Repaired in realm-and-floor-reconciliation. It still does **not** route through this model, and
+ * the reason is the same one that reverted the first attempt: this package's harness
+ * (`tests/TestCase.php`) names its single sqlite connection `testing` and defines no `central` at
+ * all, so a literal `central` pin makes the audit's schema probe answer "no such table" and degrade
+ * to a self-describing pass — three of its tests flipped Warn → Pass, i.e. the audit stopped
+ * detecting while still reporting green.
+ *
+ * Instead it resolves the connection through
+ * {@see \Splicewire\Beam\Tenancy\Support\TenancyConnections::central()}, which reads stancl's own
+ * `tenancy.database.central_connection` and answers `null` — the caller's default — when the host
+ * declares no split or names a connection it never defined. A host that HAS a central connection
+ * gets a pinned read; a host that does not gets the read it would have had. Two tests pin both
+ * halves, and the pinned one is proven by making the default connection's pivot empty and clean, so
+ * an unpinned reader reports Pass and fails the test.
+ *
+ * The literal pin below stays exactly where it is: `CentralPinJustificationAudit` reads
+ * declarations, and a resolver call is not one. The resolver is for readers with no model to pin.
  *
  * ## ⛔ There is no shared scope here, and that is a measured decision
  * The four raw readers this model consolidates do NOT ask the same question, so this class
