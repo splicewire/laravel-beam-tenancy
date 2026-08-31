@@ -100,7 +100,24 @@ class TestCase extends Orchestra
 
     protected function defineDatabaseMigrations(): void
     {
-        // Mirrors create_tenants_table.php.stub. `slug` and `parent_tenant_id` are REAL columns,
+        // ⚠️ It does NOT mirror the stub, and the difference is measured: `create_tenants_table.php.stub`
+        // declares `name` and `slug` NOT NULL (lines 45-46); this fixture makes both nullable. Found
+        // 2026-08-31 by `Rushing\SchemaConvergence\Testing\ShippedStubProbe`, which runs the shipped
+        // stubs onto a throwaway connection and diffs them against this schema — 25 columns compared,
+        // these two divergent, and they were the ONLY drift found anywhere in the estate's 19
+        // stub-shipping repos (250 columns compared across the four others: 0).
+        //
+        // Converging the fixture to the stub was tried and REVERTED, because the cost is the finding:
+        // 119 passed becomes 34 failed / 85 passed, every one of them
+        // `NOT NULL constraint failed: tenants.slug`. So 34 tests create a tenant with no slug, which
+        // this package's own shipped schema forbids — they are green against a schema no host has.
+        //
+        // That is a ruling someone has to make, not a cleanup: either those 34 tests start supplying a
+        // slug, or the stub is wrong to demand one (a tenant created before it is named is a coherent
+        // product position). Whichever way it goes, this comment should stop claiming a mirror it is
+        // not. Re-measure with the probe rather than trusting this note.
+        //
+        // `slug` and `parent_tenant_id` are REAL columns,
         // not data-> keys — Tenant::getCustomColumns() names them — so a harness without them
         // fails any test that touches the actual Tenant rather than the TestTenant fixture.
         Schema::create('tenants', function (Blueprint $table) {
