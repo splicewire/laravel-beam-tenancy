@@ -31,6 +31,7 @@ use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
+use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
 use Stancl\Tenancy\Listeners\UpdateSyncedResource;
@@ -64,6 +65,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         parent::register();
 
         $this->registerMachineIdentityKinds();
+        $this->registerProvisioningSteps();
         $this->registerMachineIdentityAwareSyncListener();
 
         $this->app->singleton(IsolatedDatabaseDestination::class, function ($app) {
@@ -140,6 +142,25 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * that class's table. Neither list is a guess: each entry below cites where it was read off the
      * estate. Do not add an ability here that nothing enforces.
      */
+    /**
+     * Bind {@see TenantProvisioningStepRegistry}.
+     *
+     * ⚠️ A SINGLETON, and that is the whole point of binding it at all. An unbound registry stays
+     * auto-resolvable, so `app()` hands back a FRESH, empty instance on every call — the engine tier
+     * would register its pipeline into one object and every caller would read another. Nothing would
+     * error; provisioning would simply run zero steps. This estate's signature defect, and the reason
+     * `TenantProvisioningStepRegistryTest` asserts `app($c) === app($c)` rather than only that a
+     * registry resolves.
+     *
+     * This package ships NO default pipeline. The steps are engine-tier classes that beam-tenancy
+     * cannot see (`Splicewire\Tower\Provisioning\*`), so a default here could only be a guess or an
+     * empty list presented as an answer. The tier that owns the steps registers them.
+     */
+    protected function registerProvisioningSteps(): void
+    {
+        $this->app->singleton(TenantProvisioningStepRegistry::class, fn () => new TenantProvisioningStepRegistry);
+    }
+
     protected function registerMachineIdentityKinds(): void
     {
         $this->app->singleton(MachineIdentityKindRegistry::class, function ($app) {
