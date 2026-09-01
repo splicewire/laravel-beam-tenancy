@@ -1023,6 +1023,17 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         return 'removed_at';
     }
 
+    /**
+     * A seat's "joined" moment is `tenant_users.accepted_at` — the stamp
+     * {@see \Splicewire\Tower\Tenancy\Invitations\AcceptTenantInvitation} writes when an invitee
+     * redeems their link — not the pivot row's `created_at`, which {@see HasMembers} defaults to and
+     * which `users()` does not even carry in its `withPivot()` list.
+     */
+    public function memberJoinedColumn(): string
+    {
+        return 'accepted_at';
+    }
+
     public function teamKey(): int|string
     {
         return $this->getKey();
