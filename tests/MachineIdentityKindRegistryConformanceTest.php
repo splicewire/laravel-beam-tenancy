@@ -79,7 +79,7 @@ it('declares MEASURED abilities for both kinds beam-tenancy ships', function () 
     // `sync` — every entry is a gate that actually reads it: `engine:consume` is the only coarse gate
     // on the loopback's two guarded routes; the `composition.*` four are what `EngineConsumerToken`
     // already derives for this exact principal; `fragment.*` covers the connector paths;
-    // `manage-schemas` the satellite schema path. This replaced an implicit `['*']` on the
+    // `schemas.manage` the satellite schema path. This replaced an implicit `['*']` on the
     // `splicewire-sync` token, which under the permission-cascade CredentialScope meant no scope
     // narrowing at all.
     expect($registry->get('sync')->abilities())->toBe([
@@ -92,7 +92,7 @@ it('declares MEASURED abilities for both kinds beam-tenancy ships', function () 
         'fragment.create',
         'fragment.update',
         'fragment.delete',
-        'manage-schemas',
+        'schemas.manage',
     ])->and($registry->get('sync')->hasMeasuredAbilities())->toBeTrue();
 
     // `system` — measured EMPTY, which is a real answer and not a hole. The pairing of these two

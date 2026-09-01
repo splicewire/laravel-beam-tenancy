@@ -182,7 +182,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                     //    CredentialScope intersects principal permissions with token abilities, so
                     //    a coarse-only token scopes to nothing and the composition policy denies.
                     //  - the `fragment.*` four cover the connector paths the sync daemon drives.
-                    //  - `manage-schemas` covers the satellite schema path.
+                    //  - `schemas.manage` covers the satellite schema path.
                     abilities: [
                         'engine:consume',
                         'composition.view',
@@ -193,7 +193,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                         'fragment.create',
                         'fragment.update',
                         'fragment.delete',
-                        'manage-schemas',
+                        'schemas.manage',
                     ],
                     description: 'The federation sync daemon — the identity behind the estate\'s '
                         .'tenant sync pipeline. Historically seated on `tenant_users` as '
