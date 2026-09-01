@@ -105,7 +105,7 @@ class MachineIdentityOnMembershipPivotAudit implements DoctorAudit
     private function measure(): Finding
     {
         if (! $this->schema()->hasTable('tenant_users')) {
-            return Finding::pass(
+            return Finding::inconclusive(
                 self::CHECK,
                 'This host has no `tenant_users` table, so there is no membership pivot to measure.',
             );
