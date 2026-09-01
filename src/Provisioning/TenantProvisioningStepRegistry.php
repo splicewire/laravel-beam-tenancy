@@ -27,7 +27,15 @@ use Rushing\Popcorn\Registries\RegistryKey;
  *   under the comment *"Keep this list in lockstep with that pipeline so a synchronous provision is
  *   a faithful mirror of the queued one — no missing step drift."*
  * - `~/Herd/standwell/app/Providers/TenancyServiceProvider.php:27-35` — five steps whose classes are
- *   app-local (`App\Jobs\Tenant\*`) and share NAMES with tower's, which is worse than differing.
+ *   app-local (`App\Jobs\Tenant\*`) and share NAMES with tower's.
+ *
+ * ⚠️ **CORRECTED 2026-08-31, same day: standwell CANNOT use this registry, and an earlier version of
+ * this docblock said it could.** That host requires neither `splicewire/tower` nor
+ * `splicewire/laravel-beam-tenancy` — `vendor/splicewire/` there holds beam, satellite, connector and
+ * others, and no beam-tenancy at all — so the registry is unreachable from it and its five steps are
+ * not a "fourth copy" of anything. The shared names are coincidence between two independent hosts,
+ * not a coupling. `Supersede` below is still correct and still useful, for a host that DOES vendor
+ * this package; standwell is simply not evidence for it.
  *
  * A comment instructing a human to keep two arrays identical is a registry that has not been written
  * yet. It had already failed: the two lists agree on membership 13/13 and disagree on ORDER —
