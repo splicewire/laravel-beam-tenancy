@@ -336,7 +336,36 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // class-string morph the host still has. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
         // A host booting later keeps last-writer override authority, so a host that substitutes its
         // own Tenant model can still repoint the alias.
-        Relation::morphMap(['tenant' => Tenant::class]);
+        // The `tenant_user` alias, on exactly the same reasoning one paragraph up, for the model that
+        // HOLDS every tenant-scoped role grant. `TenantUser` uses spatie's `HasRoles`, whose `roles()`
+        // is a plain `morphToMany` — so Laravel writes `$parent->getMorphClass()` into
+        // `model_has_roles.model_type` and constrains every read against the same value
+        // (`MorphToMany:71` sets `$this->morphClass` once; lines 88/98/111/119/146/160 all use it).
+        // With no alias declared that value was the fully-qualified class name, which is precisely the
+        // durable class-name-in-a-column ADR-0118 exists to prevent.
+        //
+        // Measured at ~/Herd/splicewire-app 2026-09-01, `public.model_has_roles`: 35 rows holding the
+        // FQCN against 2 holding `user` — one column, two vocabularies, because `App\Models\User` was
+        // aliased by the host and this model was not. ADR-0217 decision 5 ("registration follows
+        // ownership") puts the alias here, in the package that owns the model, not at the host.
+        //
+        // The key is the snake_case SHORT NAME of the class, per house rule — never the table, which
+        // is `users` and already spoken for. `user` is likewise already bound to the central
+        // `App\Models\User`, and the two models are distinct role holders that can share a uuid (they
+        // are `Syncable` counterparts), so a DISTINCT key is required: the pivot's unique constraint
+        // is `(team_id, role_id, model_id, model_type)` and collapsing both onto `user` would collide.
+        // `tenant_user` is free in the booted 113-entry morph map and among the host's 54 particle
+        // resource keys.
+        //
+        // ⚠️ This declaration and the data migration that rewrites the existing rows are ONE change.
+        // Because spatie constrains reads with the same token it writes, registering the alias without
+        // converting the rows makes every pre-existing grant invisible and 403s every policy-gated
+        // surface for those holders. See the app's
+        // `database/migrations/2026_09_01_000400_store_morph_aliases_in_permission_tables.php`.
+        Relation::morphMap([
+            'tenant' => Tenant::class,
+            'tenant_user' => Models\TenantUser::class,
+        ]);
 
         $this->registerSharedMigrationsPath();
         $this->bootFrameResources();
