@@ -51,6 +51,15 @@ beforeEach(function () {
     Event::listen(Events\TenancyEnded::class, Listeners\RevertToCentralContext::class);
 
     RecordingBootstrapper::reset();
+
+    // `EndingTenancy` fires UNCONDITIONALLY at the top of `Tenancy::end()`; only `TenancyEnded` is
+    // gated on `initialized` (`vendor/stancl/tenancy/src/Tenancy.php:63-69`). So the bootstrapper's
+    // revert count — driven by `TenancyEnded` — cannot see whether `end()` was CALLED, only whether it
+    // did anything. Counting the ungated event is what makes the "harmless" test below able to fail.
+    $GLOBALS['ending_tenancy_fired'] = 0;
+    Event::listen(Events\EndingTenancy::class, function (): void {
+        $GLOBALS['ending_tenancy_fired']++;
+    });
 });
 
 function terminateOneRequest(): void
@@ -102,17 +111,25 @@ it('is harmless when the request never bootstrapped tenancy', function () {
     // A central request must not pay for, or break on, a revert that has nothing to revert.
     expect(tenancy()->initialized)->toBeFalse()
         ->and(RecordingBootstrapper::$reverted)->toBe(0);
+
+    // ⚠️ The assertion that gives this test teeth, added after a mutation review. Dropping the
+    // middleware's `if ($tenancy->initialized)` guard — the precise defect the comment above names —
+    // left every assertion above GREEN, because `Tenancy::end()` no-ops on an uninitialized tenancy
+    // and the revert count reads 0 either way. `EndingTenancy` is the only signal that distinguishes
+    // "we correctly did nothing" from "we called end() on every central response".
+    expect($GLOBALS['ending_tenancy_fired'])->toBe(0);
 });
 
 it('is actually registered in the global middleware stack', function () {
     // The estate's signature defect is a declaration nothing consumes. A terminable middleware that
     // is never pushed onto the kernel is exactly that: it would pass every unit test of its own
     // `terminate()` method and never run in production.
-    $kernel = app(HttpKernel::class);
-
-    $reflected = new ReflectionClass($kernel);
-    $property = $reflected->getProperty('middleware');
-    $property->setAccessible(true);
-
-    expect($property->getValue($kernel))->toContain(EndTenancyOnTerminate::class);
+    // `hasMiddleware()` is public (`Illuminate\Foundation\Http\Kernel:336`), so reaching through
+    // reflection at a protected property was gratuitously brittle.
+    //
+    // ⚠️ Resolved through the CONTRACT, never the concrete class. `app(Foundation\Http\Kernel::class)`
+    // is auto-resolvable, so it hands back a FRESH kernel with an empty middleware stack — this
+    // assertion failed against working code until it asked the container for the bound instance
+    // instead of a new one. Declaration is not resolution.
+    expect(app(HttpKernel::class)->hasMiddleware(EndTenancyOnTerminate::class))->toBeTrue();
 });
