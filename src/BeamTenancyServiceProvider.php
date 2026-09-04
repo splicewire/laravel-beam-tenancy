@@ -2,7 +2,9 @@
 
 namespace Splicewire\Beam\Tenancy;
 
+use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Support\Facades\Gate;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
@@ -368,6 +370,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         ]);
 
         $this->registerSharedMigrationsPath();
+        $this->registerTenancyTerminator();
         $this->bootFrameResources();
 
         // Join beam-core's bypass/redundancy/house-style audit sweeps: contribute this package's HTTP
@@ -557,6 +560,45 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
 
         if (! in_array($sharedDir, $paths, true)) {
             config()->push('tenancy.migration_parameters.--path', $sharedDir);
+        }
+    }
+
+    /**
+     * Push {@see Http\Middleware\EndTenancyOnTerminate} onto the global HTTP middleware stack, so a
+     * request that bootstrapped tenancy leaves the connection in central context when it terminates.
+     *
+     * ⚠️ This is a **correctness** requirement under Octane/FrankenPHP, not hygiene. A worker's
+     * connection outlives the request, and `PostgreSQLSchemaManager` sets `search_path = "$tenant,public"`
+     * — so a leaked frame resolves silently against the wrong tenant's rows instead of erroring. See the
+     * middleware's own docblock for the full reasoning and the measurement behind it.
+     *
+     * **Global, not a route group.** A tenant is identified by middleware that any route can decline to
+     * use; the *reset* must not be declinable the same way, or the one route that forgets it poisons
+     * every request that follows it in that worker.
+     *
+     * **Pushed, not prepended.** Laravel terminates middleware in stack order, so appending makes this
+     * the last `terminate()` to run — anything else terminating on the same request still sees tenancy.
+     *
+     * Guarded three ways, because a package provider boots in contexts an app kernel does not exist in:
+     * console-only harnesses, and hosts that deliberately manage the lifecycle themselves
+     * (`beam.tenancy.end_on_terminate => false`).
+     */
+    protected function registerTenancyTerminator(): void
+    {
+        if (! config('beam.tenancy.end_on_terminate', true)) {
+            return;
+        }
+
+        if (! $this->app->bound(HttpKernelContract::class)) {
+            return;
+        }
+
+        $kernel = $this->app->make(HttpKernelContract::class);
+
+        // `pushMiddleware` is itself idempotent (it checks `array_search` before appending), so a
+        // double-boot cannot register this twice.
+        if ($kernel instanceof HttpKernel) {
+            $kernel->pushMiddleware(Http\Middleware\EndTenancyOnTerminate::class);
         }
     }
 }

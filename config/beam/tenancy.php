@@ -24,6 +24,21 @@ return [
      */
     'bind_tenant_model' => env('BEAM_TENANCY_BIND_TENANT_MODEL', true),
 
+    /*
+     * End tenancy when a web request terminates, so the next request in the same process starts in
+     * central context.
+     *
+     * ⚠️ Turning this OFF is only safe under request-per-process PHP, where the process dies with the
+     * request and takes the connection with it. Under Octane/FrankenPHP the worker's connection
+     * outlives the request, and the next request inherits the previous tenant's `search_path` —
+     * resolving SILENTLY against another tenant's rows, because the schema manager sets
+     * `search_path = "$tenant,public"` and the wrong schema still satisfies every query.
+     *
+     * A host that manages the lifecycle itself may set this false; a host running a persistent worker
+     * must not.
+     */
+    'end_on_terminate' => env('BEAM_TENANCY_END_ON_TERMINATE', true),
+
     'system_tenant' => [
         'slug' => env('SPLICEWIRE_SYSTEM_TENANT_SLUG', 'system'),
         'name' => 'System',

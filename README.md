@@ -28,6 +28,8 @@ carries the **designated system tenant** resolver it started life as.
   default so a host binds only what it needs. A sitemap base-URL resolver returns the active
   tenant's domain, falling back to the configured default when tenancy is absent.
 - **Doctor** — an audit for the migration wiring.
+- **Request lifecycle** — `EndTenancyOnTerminate`, pushed onto the global HTTP middleware stack, ends
+  tenancy when a request terminates. See below; it is a correctness requirement under Octane.
 
 ## Install
 
@@ -137,6 +139,31 @@ Notes worth having before you change it:
   `accepted_at` is stamped only when null — a second run is row-for-row identical.
 - **Never in production.** The gate defaults to on everywhere else, mirroring
   `beam.accounts.demo.seed_users`.
+
+## Tenancy ends when the request ends
+
+`EndTenancyOnTerminate` is pushed onto the global HTTP middleware stack at boot and calls
+`tenancy()->end()` in its `terminate()`, which fires stancl's `TenancyEnded` and reverts every
+bootstrapper — including the reconnect to central.
+
+**Under request-per-process PHP this is nearly free and looks unnecessary.** The process dies at the
+end of the request and takes the connection with it, so a request that never ended tenancy costs
+nothing. It is a correctness requirement the moment a host runs a **persistent worker** (Octane,
+FrankenPHP, Swoole), because the worker's connection outlives the request.
+
+The failure it prevents is silent, which is the reason it is a middleware rather than a convention.
+`PostgreSQLSchemaManager` sets `search_path = "$tenant,public"`, so a leaked frame does not error on a
+missing table — every query resolves against the *previous* tenant's copy and returns rows. Nothing in
+the response says which tenant answered.
+
+stancl ships no terminating middleware and no `terminate` hook of any kind, so nothing called `end()`
+at the end of a web request before this. The evidence that the gap was real and already being worked
+around by hand: the flagship's test suite has 147 files calling a `cleanUpTenantState()` helper whose
+first act is exactly this `end()`, because `tearDown()` does not end tenancy either. A worker has no
+`beforeEach`.
+
+Disable with `beam.tenancy.end_on_terminate => false` (env `BEAM_TENANCY_END_ON_TERMINATE`) only if the
+host manages the lifecycle itself. **A host running a persistent worker must not disable it.**
 
 ## Dependency direction
 
