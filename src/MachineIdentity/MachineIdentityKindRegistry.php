@@ -10,7 +10,6 @@ use Rushing\Popcorn\Registries\OnDuplicate;
 use Rushing\Popcorn\Registries\Optionality;
 use Rushing\Popcorn\Registries\Registrar;
 use Rushing\Popcorn\Registries\Registry;
-use Rushing\Popcorn\Registries\RegistryArity;
 use Rushing\Popcorn\Registries\RegistryKey;
 
 /**
@@ -61,11 +60,10 @@ use Rushing\Popcorn\Registries\RegistryKey;
  */
 #[IsRegistry(
     root: 'beam.tenancy.machine-identity.kinds',
-    of: 'machine identity kinds a tenant may hold',
-    arity: RegistryArity::PickOne,
     entryType: MachineIdentityKind::class,
     onDuplicate: OnDuplicate::Supersede,
     optionality: Optionality::Optional,
+    description: 'machine identity kinds a tenant may hold',
 )]
 class MachineIdentityKindRegistry implements Gated, Registry
 {

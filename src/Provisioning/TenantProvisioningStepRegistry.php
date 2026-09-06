@@ -11,7 +11,6 @@ use Rushing\Popcorn\Registries\OnDuplicate;
 use Rushing\Popcorn\Registries\Optionality;
 use Rushing\Popcorn\Registries\Registrar;
 use Rushing\Popcorn\Registries\Registry;
-use Rushing\Popcorn\Registries\RegistryArity;
 use Rushing\Popcorn\Registries\RegistryKey;
 
 /**
@@ -71,17 +70,10 @@ use Rushing\Popcorn\Registries\RegistryKey;
  */
 #[IsRegistry(
     root: 'beam.tenancy.provisioning.steps',
-    of: 'named tenant-provisioning pipelines — each an ORDERED list of step class-strings a host runs when a tenant is created',
-    arity: [RegistryArity::PickOne, RegistryArity::ComposeMany],
     entryType: 'list<class-string>',
     onDuplicate: OnDuplicate::Supersede,
     optionality: Optionality::Optional,
-    note: 'The read is TWO steps: PickOne selects the named pipeline, then ComposeMany runs its '
-        .'ordered steps. The steps have no keys of their own — the same step class may legitimately '
-        .'appear twice — which is why the second step is a level of the arity and not a nested root. '
-        .'`entryType` is a list rather than a class because an entry is the ordering, not an object. '
-        .'Modelled on `rushing/laravel-pipeline-registry`, which expresses the identical shape for '
-        .'Illuminate pipeline stages; this one holds queued Jobs and leaves dispatch to the caller.',
+    description: 'Named tenant-provisioning pipelines. Each entry is an ordered list of job class-strings; callers select a pipeline and dispatch its steps. Steps have no keys and may repeat.',
 )]
 class TenantProvisioningStepRegistry implements Gated, Registry
 {
