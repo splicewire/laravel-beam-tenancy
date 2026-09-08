@@ -6,8 +6,8 @@ use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
-use Rushing\Popcorn\Registries\OnDuplicate;
-use Rushing\Popcorn\Registries\Optionality;
+use Rushing\Popcorn\Registries\OnKeyDuplicate;
+use Rushing\Popcorn\Registries\PopulationRequirement;
 use Rushing\Popcorn\Registries\Registrar;
 use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryKey;
@@ -41,7 +41,7 @@ use Rushing\Popcorn\Registries\RegistryKey;
  * the store is a field, package registrations are ordinary `register()` calls, and the host half
  * arrives through a {@see \Rushing\Popcorn\Registries\Registrars\ConfigRegistrar} attached at boot.
  * `Filled`'s ordering does the rest: registrars fill at attach, hand-registration comes later, and
- * later wins under {@see OnDuplicate::Supersede} — so a host can override a package's kind by
+ * later wins under {@see OnKeyDuplicate::Supersede} — so a host can override a package's kind by
  * declaring the same key, which is the correct precedence.
  *
  * ## ⚠️ `kind` comes from the DATABASE, so reads are `tryResolve()` — never `resolve()`
@@ -61,8 +61,8 @@ use Rushing\Popcorn\Registries\RegistryKey;
 #[IsRegistry(
     root: 'beam.tenancy.machine-identity.kinds',
     entryType: MachineIdentityKind::class,
-    onDuplicate: OnDuplicate::Supersede,
-    optionality: Optionality::Optional,
+    onKeyDuplicate: OnKeyDuplicate::Supersede,
+    populationRequirement: PopulationRequirement::Optional,
     description: 'machine identity kinds a tenant may hold',
 )]
 class MachineIdentityKindRegistry implements Gated, Registry

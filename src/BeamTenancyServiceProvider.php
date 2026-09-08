@@ -133,7 +133,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * The host's own kinds arrive through a {@see ConfigRegistrar} over
      * `beam.tenancy.machine_identity.kinds`, attached inside the singleton so config is read at
      * resolve time rather than frozen at provider construction. `Filled` fills at attach and
-     * `OnDuplicate::Supersede` means a later hand-registration wins — so a host that wants to
+     * `OnKeyDuplicate::Supersede` means a later hand-registration wins — so a host that wants to
      * override `sync` declares it in config or registers it later, and does not have to fight this
      * package for the key.
      *

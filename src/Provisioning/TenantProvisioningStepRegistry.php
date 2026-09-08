@@ -7,8 +7,8 @@ use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
-use Rushing\Popcorn\Registries\OnDuplicate;
-use Rushing\Popcorn\Registries\Optionality;
+use Rushing\Popcorn\Registries\OnKeyDuplicate;
+use Rushing\Popcorn\Registries\PopulationRequirement;
 use Rushing\Popcorn\Registries\Registrar;
 use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryKey;
@@ -58,7 +58,7 @@ use Rushing\Popcorn\Registries\RegistryKey;
  * provider, and a host supersedes it from config. A config array as storage cannot express the first,
  * because a package would have to mutate another tier's config to register anything.
  *
- * `OnDuplicate::Supersede` is what makes standwell's variant a *registration* rather than a fourth
+ * `OnKeyDuplicate::Supersede` is what makes standwell's variant a *registration* rather than a fourth
  * copy: it declares the same key later and wins.
  *
  * ## Reads are `resolve()`, not `tryResolve()`
@@ -71,8 +71,8 @@ use Rushing\Popcorn\Registries\RegistryKey;
 #[IsRegistry(
     root: 'beam.tenancy.provisioning.steps',
     entryType: 'list<class-string>',
-    onDuplicate: OnDuplicate::Supersede,
-    optionality: Optionality::Optional,
+    onKeyDuplicate: OnKeyDuplicate::Supersede,
+    populationRequirement: PopulationRequirement::Optional,
     description: 'Named tenant-provisioning pipelines. Each entry is an ordered list of job class-strings; callers select a pipeline and dispatch its steps. Steps have no keys and may repeat.',
 )]
 class TenantProvisioningStepRegistry implements Gated, Registry
