@@ -46,6 +46,9 @@ and isolated tenants; and its plain `SET` does not survive a reconnect.
 5. **A pool is migrated once**, as the owner, by `splicewire:beam:tenancy:pools:migrate`: drop the
    policies, run the same paths `tenants:migrate` would, re-prepare (policy names carry a body hash
    so outdated ones are recreated; zombies dropped — also v4's idea), re-grant the role. stancl's
+   The owner connection binds the setting to the pool's own key (`pool:<name>`, a key no tenant can
+   carry) while migrating, so rows a migration or a post-migrate listener inserts are stamped to the
+   pool rather than left NULL (measured at the flagship: `roles`/`permissions` seeded after `migrate`).
    `tenants:migrate` is extended through the container to skip pooled tenants by name and to never
    fan out on an empty list; `tenants:rollback` and `tenants:migrate-fresh` refuse a pooled tenant
    outright, because a rollback or wipe of the tenant connection is one of the whole pool. A data

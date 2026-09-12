@@ -212,6 +212,9 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
    if absent, removes the policies for the window, runs the same migration paths `tenants:migrate` would,
    re-prepares (column, index, hashed policy, unique-index rewrite), re-grants the role. Once per pool, as
    the owner, never inside a tenant frame. The first pooled tenant of a pool runs the same path on creation.
+   The owner connection binds the setting to `pool:<name>` while it works, so rows a migration or a
+   post-migrate listener inserts (measured: `roles`/`permissions` at the flagship) are stamped to the pool
+   and no tenant sees them; per-tenant seed data is a provisioning step inside the tenant's frame.
 3. **`tenants:migrate` skips pooled tenants** by name (and never fans out on an empty list); migrate the
    pool instead. **`tenants:rollback` and `tenants:migrate-fresh` refuse** a pooled tenant — the tenant
    connection is the whole pool. A hand-run `migrate --database=…` against a pool connection is not

@@ -18,7 +18,8 @@ use Splicewire\Beam\Tenancy\Support\TenancyConnections;
  * so a pool can never exist un-prepared or be prepared two different ways.
  *
  * The sequence, on a transient owner connection whose `search_path` is `"<pool schema>,public"`
- * (the same `,public` fall-through every tenant schema relies on, see `TenancyConnections`):
+ * (the same `,public` fall-through every tenant schema relies on, see `TenancyConnections`) and
+ * whose session setting is bound to the pool's own key ({@see poolKey()}):
  *
  *   1. `CREATE SCHEMA IF NOT EXISTS` — the owner is the central connection's user.
  *   2. Drop the row-level-security policies. A policy that references a column blocks some ALTERs
@@ -39,6 +40,20 @@ use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 class PoolMigrator
 {
     /**
+     * The key the pool's OWNER connection binds while migrating (`pool:<name>` — a colon, which no
+     * tenant key can carry). Measured at the flagship (pooled-storage 07): a post-migrate listener
+     * seeds `roles` and `permissions` after `migrate` returns, so a pool migrated with no key bound
+     * held rows that belonged to nobody and the preparer rightly refused `SET NOT NULL`. With this key
+     * bound, every row a migration or listener inserts is stamped to the pool — invisible to every
+     * tenant under the policy, never NULL — and per-tenant seed data keeps arriving the way it always
+     * has: through the provisioning steps that run INSIDE each tenant's frame (`SeedPermissions`…).
+     */
+    public static function poolKey(string $pool): string
+    {
+        return 'pool:'.$pool;
+    }
+
+    /**
      * Create the pool if it is absent, then migrate and prepare it. Idempotent.
      */
     public function ensure(string $pool): PreparationReport
@@ -49,7 +64,7 @@ class PoolMigrator
     public function migrate(string $pool): PreparationReport
     {
         $schema = $this->schemaFor($pool);
-        $name = $this->registerOwnerConnection($schema);
+        $name = $this->registerOwnerConnection($schema, $pool);
 
         try {
             $connection = DB::connection($name);
@@ -155,7 +170,7 @@ class PoolMigrator
      * as the owner, with the pool spliced into `search_path`. Named per pool so two pools migrating in
      * one process never share a PDO.
      */
-    protected function registerOwnerConnection(string $schema): string
+    protected function registerOwnerConnection(string $schema, string $pool): string
     {
         $template = TenancyConnections::central() ?? Config::get('database.default');
         $config = Config::get("database.connections.{$template}");
@@ -165,7 +180,9 @@ class PoolMigrator
         }
 
         $config['search_path'] = "{$schema},public";
-        unset($config['session_settings']);
+        $config['session_settings'] = [
+            (string) Config::get('beam.tenancy.pooled.session_setting', 'app.tenant_id') => self::poolKey($pool),
+        ];
 
         $name = "beam_pool_{$schema}";
         Config::set("database.connections.{$name}", $config);

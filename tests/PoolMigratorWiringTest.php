@@ -64,3 +64,8 @@ it('refuses a pool name that is not a bare identifier — it becomes a schema na
     expect(fn () => (new PoolMigrator)->schemaFor('Bad-Name'))->toThrow(RuntimeException::class, 'schema name')
         ->and((new PoolMigrator)->schemaFor('eu_west'))->toBe('pool_eu_west');
 });
+
+it('binds the pool\'s own key, which no tenant key can carry, on the owner connection it migrates through', function () {
+    expect(PoolMigrator::poolKey('default'))->toBe('pool:default')
+        ->and(preg_match('/^[a-z0-9_]+$/', PoolMigrator::poolKey('default')))->toBe(0);
+});
