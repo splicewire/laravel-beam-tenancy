@@ -114,3 +114,34 @@ it('provisions the non-owner role idempotently — LOGIN, no SUPERUSER, no BYPAS
 
     DB::statement('drop role beam_tenancy_role_probe');
 });
+
+it('ends tenancy when a pooled request terminates — a second request with no tenant bound reads zero pool rows', function () {
+    // pooled-storage 07 review: the sqlite EndTenancyOnTerminateTest proves the MECHANISM (a
+    // RecordingBootstrapper reverts) but never a pooled tenant, and this package's own "unbound
+    // connection" test only probed a hand-built config, never the real request lifecycle. This is
+    // that case: the actual middleware, a real pooled tenant, real Postgres.
+    $alpha = provisionPooled('alpha');
+    $middleware = app(Splicewire\Beam\Tenancy\Http\Middleware\EndTenancyOnTerminate::class);
+
+    tenancy()->initialize($alpha);
+    DB::connection('tenant')->table('pooled_notes')->insert(['slug' => 'term-1', 'title' => 'x']);
+    expect(tenancy()->initialized)->toBeTrue();
+
+    // The framework's real terminate() call — what ends a request under Octane/FrankenPHP.
+    $middleware->terminate(Illuminate\Http\Request::create('/'), new Illuminate\Http\Response);
+
+    expect(tenancy()->initialized)->toBeFalse();
+
+    // The NEXT request, in the same process, binds no tenant. Under the schema-per-tenant manager a
+    // leaked frame reads the wrong tenant's rows silently; under pooled storage a leaked or unbound
+    // frame reads ZERO rows, because the policy — not search_path — is what's doing the scoping.
+    $unbound = $alpha->database()->connection();
+    unset($unbound['session_settings']);
+    config(['database.connections.term_unbound_probe' => $unbound]);
+
+    try {
+        expect(DB::connection('term_unbound_probe')->table('pool_default.pooled_notes')->where('slug', 'term-1')->count())->toBe(0);
+    } finally {
+        DB::purge('term_unbound_probe');
+    }
+});
