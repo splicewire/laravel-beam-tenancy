@@ -294,5 +294,12 @@ return [
 
         // The namespaced Postgres setting the policy keys on. Must carry a dot.
         'session_setting' => env('BEAM_TENANCY_RLS_SETTING', 'app.tenant_id'),
+
+        // Opt-in (pooled-storage ticket 10): whether `pools:direct-access` may issue or revoke a
+        // per-tenant login role at all — a role whose OWN `ALTER ROLE ... SET` binds the session
+        // setting, so a direct connection (a BI tool, psql) as it sees exactly that tenant's rows
+        // with no application in the path. Off by default: a role per pooled tenant is a real
+        // credential surface a host opts into, not a default every pooled tenant carries.
+        'direct_access_roles' => (bool) env('BEAM_TENANCY_DIRECT_ACCESS_ROLES', false),
     ],
 ];

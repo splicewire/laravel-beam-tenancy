@@ -226,6 +226,12 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
    through a probe connection built the way the hybrid manager builds a pooled tenant's. Both are
    inconclusive over zero pooled tenants.
 
+6. **Direct access (opt-in).** With `BEAM_TENANCY_DIRECT_ACCESS_ROLES=true`,
+   `php artisan splicewire:beam:tenancy:pools:direct-access <tenant>` issues a login role whose own
+   `ALTER ROLE ... SET` binds that tenant's key, so a BI tool or `psql` connecting as it sees only that
+   tenant's rows with no application in the path. The password prints once and is stored nowhere; the
+   tenant keeps only the role name. Re-running rotates the password; `--revoke` drops the role.
+
 `BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
 `BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.
 

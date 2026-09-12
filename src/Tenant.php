@@ -47,6 +47,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string|null $pool The pool this tenant's rows live in when its storage is Pooled — the bare pool name, prefixed with `beam.tenancy.pooled.schema_prefix` to make the schema (stored in data column; pooled-storage ticket 04). Null = not pooled. Never read this to decide storage: call {@see storage()}.
  * @property string|null $requested_storage What the creator asked for — `pooled` or `schema` — consumed once by {@see \Splicewire\Beam\Tenancy\Provisioning\DecideStorage} (stored in data column; pooled-storage ticket 04). A request, not a state.
  * @property array<string, string>|null $tenancy_db_session_settings Postgres session settings the pooled connection applies on connect — `['app.tenant_id' => <key>]` — riding stancl's `tenancy_db_*` merge into the tenant connection config as `session_settings` (stored in data column; pooled-storage ticket 04/05)
+ * @property string|null $direct_access_role The name of this tenant's direct-access Postgres role (a role per key, ALTER ROLE ... SET-bound to it) — never the password, which is handed out once by `pools:direct-access` and stored nowhere (stored in data column; pooled-storage ticket 10)
  * @property string|null $retired_schema_name The old shared-cluster schema name retained past an isolated-database cutover for the rollback window; null once retired/dropped (stored in data column; tenant-database-upsell ticket 03/04)
  * @property string|null $parent_tenant_id Broker tenant this is a Brokered Tenant of; null = a direct tenant (real column, self-referential; see ADR-0043)
  * @property array{endpoint: string, token?: string|null}|null $provisioning_webhook Broker callback for terminal provisioning status (stored in data column; see ADR-0043)
@@ -428,6 +429,23 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public static function poolSchemaFor(string $pool): string
     {
         return PoolMigrator::schemaNameFor($pool);
+    }
+
+    /**
+     * The name of this tenant's direct-access Postgres role (pooled-storage ticket 10), or null
+     * when it has none. The ONLY thing stored — never the password, which `pools:direct-access`
+     * hands out once and keeps nowhere.
+     */
+    public function markDirectAccessRole(?string $role): self
+    {
+        $this->direct_access_role = $role;
+
+        return $this;
+    }
+
+    public function hasDirectAccessRole(): bool
+    {
+        return is_string($this->direct_access_role) && $this->direct_access_role !== '';
     }
 
     /**

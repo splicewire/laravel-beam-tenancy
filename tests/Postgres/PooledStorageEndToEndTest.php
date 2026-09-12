@@ -13,17 +13,6 @@ use Stancl\Tenancy\Commands\Migrate;
  * migrator, the connector, the policy and the delete branch, end to end. The sqlite suite proves the
  * wiring with fakes; this proves the mechanism.
  */
-function provisionPooled(string $id): Tenant
-{
-    $tenant = Tenant::create(['id' => $id, 'name' => ucfirst($id), 'slug' => $id]);
-    $tenant->markPooled('default')->save();
-    // What stancl's CreateDatabase job does, minus the queue.
-    $tenant->database()->makeCredentials();
-    $tenant->database()->manager()->createDatabase($tenant);
-
-    return Tenant::find($id);
-}
-
 it('keeps two pooled tenants apart in one schema, migrates the pool once, and deletes only the leaving tenant\'s rows', function () {
     $a = provisionPooled('alpha');
     $b = provisionPooled('bravo');
