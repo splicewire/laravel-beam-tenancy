@@ -72,6 +72,19 @@ class TenancyConnections
     }
 
     /**
+     * Remove a transient connection's config outright and purge its PDO — the repository's
+     * `offsetUnset` leaves a null entry behind, which `array_key_exists` and the rushing audits'
+     * `ConnectionConfig` both still see. Used by the pool migrator and the doctor probe.
+     */
+    public static function forget(string $name): void
+    {
+        \Illuminate\Support\Facades\DB::purge($name);
+        $connections = (array) Config::get('database.connections', []);
+        unset($connections[$name]);
+        Config::set('database.connections', $connections);
+    }
+
+    /**
      * Whether the host actually runs a central/tenant split — i.e. it names a central connection AND that
      * connection is not merely the default. Lets a caller say what it measured rather than assuming.
      */

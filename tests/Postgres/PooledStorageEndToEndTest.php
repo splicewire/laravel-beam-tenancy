@@ -86,6 +86,10 @@ it('passes the pooled-storage doctor audits over a prepared pool, and fails cove
         ->and(collect($findings)->filter(fn ($f) => $f->status === Rushing\Doctor\DoctorStatus::Fail)->map(fn ($f) => $f->check.': '.$f->detail)->all())->toBe([])
         ->and(array_key_exists('beam_pool_probe_default', config('database.connections')))->toBeFalse('probe purged');
 
+    // The advisory frame half reports the live setting on the probe, and no Fail.
+    $frame = app(Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit::class)->run();
+    expect(collect($frame)->pluck('status')->unique()->all())->toBe([Rushing\Doctor\DoctorStatus::Pass]);
+
     // The markers audit passes too: both tenants carry their own key and the pool schema.
     expect(app(Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit::class)->run()[0]->status)->toBe(Rushing\Doctor\DoctorStatus::Pass);
 

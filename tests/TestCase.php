@@ -8,6 +8,7 @@ use Orchestra\Testbench\TestCase as Orchestra;
 use Rushing\Popcorn\Laravel\PopcornServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
+use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Tenant;
@@ -50,6 +51,11 @@ class TestCase extends Orchestra
         // it has at a real host — otherwise the registration silently no-ops and the test that
         // asserts it would be measuring an empty room.
         $app->singleton(BeamSeedManifest::class);
+
+        // Same reasoning for the doctor manifest: beam-core binds it in register(); without it this
+        // package's audit registrations are skipped behind `bound()` and a test asserting them
+        // measures an empty room (pooled-storage ticket 06).
+        $app->singleton(BeamDoctorManifest::class);
 
         // ⚠️ stancl's `GeneratesIds::getIncrementing()` returns `! app()->bound(UniqueIdentifierGenerator)`
         // — so with the generator UNBOUND, a Tenant is treated as AUTO-INCREMENTING no matter that the

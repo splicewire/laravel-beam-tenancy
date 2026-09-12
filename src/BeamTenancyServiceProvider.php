@@ -36,6 +36,7 @@ use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
+use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
@@ -454,12 +455,20 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 gate: true,
             );
 
-            // GATES: the four rushing/laravel-postgres-rls audits over every pool, through a probe
-            // connection per pool (see the wrapper's docblock). Inconclusive over zero pooled tenants.
+            // GATES: coverage, role and owner exposure from rushing/laravel-postgres-rls over every pool,
+            // through a probe connection per pool (see the wrapper's docblock). Inconclusive over zero
+            // pooled tenants.
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 PooledStorageAudit::class,
                 gate: true,
+            );
+
+            // ADVISORY: the frame audit (is the setting live on the probe?) — a second registration,
+            // because a Warn inside a gate registration would fail a `--floor=warn` run.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                PooledStorageFrameAudit::class,
             );
         }
 

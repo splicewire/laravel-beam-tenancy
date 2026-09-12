@@ -2,9 +2,8 @@
 
 namespace Splicewire\Beam\Tenancy\Doctor;
 
-use Illuminate\Database\ConnectionResolverInterface;
+use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 use Rushing\Doctor\DoctorAudit;
 use Rushing\Doctor\Finding;
 use Rushing\PostgresRls\Audits\AuditScope;
@@ -38,7 +37,12 @@ use Throwable;
  */
 class PooledStorageAudit implements DoctorAudit
 {
-    public function __construct(private readonly ConnectionResolverInterface $db) {}
+    /**
+     * @param  bool  $gates  true = the three gate audits (coverage, role, owner exposure); false = the
+     *                       advisory frame audit alone. Two registrations, because a Warn from an advisory
+     *                       sub-audit inside a GATE registration would fail a `--floor=warn` doctor run.
+     */
+    public function __construct(private readonly DatabaseManager $db, private readonly bool $gates = true) {}
 
     /**
      * @return list<Finding>
@@ -59,24 +63,29 @@ class PooledStorageAudit implements DoctorAudit
 
         try {
             foreach ($byPool as $pool => $tenants) {
-                $probes[(string) $pool] = $this->registerProbe((string) $pool, $tenants->first());
+                // Recorded BEFORE the config write, so a throw in between still reaches the purge.
+                $name = 'beam_pool_probe_'.$pool;
+                $probes[(string) $pool] = $name;
+                $this->registerProbe($name, $tenants->first());
             }
 
             $scope = $this->scopeFor($byPool->keys()->map(fn ($p) => (string) $p)->all(), array_values($probes));
             $connections = new ConnectionConfig((array) Config::get('database.connections', []));
 
+            if (! $this->gates) {
+                return (new FrameAudit($this->db, $scope, $connections))->run();
+            }
+
             return [
                 ...(new CoverageAudit($this->db, $scope))->run(),
                 ...(new RoleAudit($this->db, $scope, $connections))->run(),
                 ...(new OwnerExposureAudit($this->db, $scope, $connections))->run(),
-                ...(new FrameAudit($this->db, $scope, $connections))->run(),
             ];
         } catch (Throwable $e) {
             return [Finding::fail('tenancy.pooled-storage', 'Could not build a probe connection for a pool: '.$e->getMessage())];
         } finally {
             foreach ($probes as $name) {
-                DB::purge($name);
-                self::forgetConnection($name);
+                TenancyConnections::forget($name);
             }
         }
     }
@@ -107,24 +116,9 @@ class PooledStorageAudit implements DoctorAudit
     /**
      * Register the connection the hybrid manager would build for this tenant, under a probe name.
      */
-    protected function registerProbe(string $pool, Tenant $tenant): string
+    protected function registerProbe(string $name, Tenant $tenant): void
     {
-        $name = "beam_pool_probe_{$pool}";
-
         Config::set("database.connections.{$name}", $tenant->database()->connection());
         $this->db->purge($name);
-
-        return $name;
-    }
-
-    /**
-     * Remove a transient connection's config outright — the repository's `offsetUnset` leaves a null
-     * entry behind, which `ConnectionConfig` and `array_key_exists` both still see.
-     */
-    protected static function forgetConnection(string $name): void
-    {
-        $connections = (array) Config::get('database.connections', []);
-        unset($connections[$name]);
-        Config::set('database.connections', $connections);
     }
 }

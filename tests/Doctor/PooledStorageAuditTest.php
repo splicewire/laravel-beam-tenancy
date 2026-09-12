@@ -36,3 +36,12 @@ it('scopes the rushing audits to every pool schema, the central connection, the 
         ->and($scope->force)->toBeTrue()
         ->and($scope->exclude)->toBe(['migrations', 'audit_log']);
 });
+
+it('registers the frame audit separately and advisory, so its Warn cannot fail a warn-floor run', function () {
+    $manifest = app(Splicewire\Beam\Doctor\BeamDoctorManifest::class);
+    $registrations = collect($manifest->registrations())->keyBy(fn ($r) => $r->audit);
+
+    expect($registrations->get(PooledStorageAudit::class)?->gate)->toBeTrue()
+        ->and($registrations->get(Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit::class)?->gate)->toBeFalse()
+        ->and($registrations->get(Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit::class)?->gate)->toBeTrue();
+});
