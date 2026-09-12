@@ -43,6 +43,9 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string|null $isolated_database_destination Which {@see ProvisioningDestination} provisioned this tenant's Isolated Database: `'laravel_cloud'` (frozen, retired for new provisioning — ticket 16), `'gcp_cloud_sql'` (the new managed default — ticket 16), or `'customer_supplied'` (stored in data column; tenant-database-upsell ticket 13 — recorded explicitly rather than inferred, since destination-specific behavior like teardown can't safely stay guessed). Null/unset defaults to `'laravel_cloud'` for tenants that predate this marker (never a live choice for a new tenant).
  * @property string|null $isolated_database_requested_at Timestamp a tenant Owner/Admin requested the upgrade to Isolated Database — presence marks a pending, not-yet-actioned request (stored in data column; tenant-database-upsell ticket 03)
  * @property string|null $write_blocked_at Timestamp writes were blocked for a live isolated-database migration's data-copy phase; null once unblocked (stored in data column; tenant-database-upsell ticket 03/04)
+ * @property string|null $pool The pool this tenant's rows live in when its storage is Pooled — the bare pool name, prefixed with `beam.tenancy.pooled.schema_prefix` to make the schema (stored in data column; pooled-storage ticket 04). Null = not pooled. Never read this to decide storage: call {@see storage()}.
+ * @property string|null $requested_storage What the creator asked for — `pooled` or `schema` — consumed once by {@see \Splicewire\Beam\Tenancy\Provisioning\DecideStorage} (stored in data column; pooled-storage ticket 04). A request, not a state.
+ * @property array<string, string>|null $tenancy_db_session_settings Postgres session settings the pooled connection applies on connect — `['app.tenant_id' => <key>]` — riding stancl's `tenancy_db_*` merge into the tenant connection config as `session_settings` (stored in data column; pooled-storage ticket 04/05)
  * @property string|null $retired_schema_name The old shared-cluster schema name retained past an isolated-database cutover for the rollback window; null once retired/dropped (stored in data column; tenant-database-upsell ticket 03/04)
  * @property string|null $parent_tenant_id Broker tenant this is a Brokered Tenant of; null = a direct tenant (real column, self-referential; see ADR-0043)
  * @property array{endpoint: string, token?: string|null}|null $provisioning_webhook Broker callback for terminal provisioning status (stored in data column; see ADR-0043)
@@ -392,6 +395,40 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public function isolatedDatabaseDestination(): string
     {
         return $this->isolated_database_destination ?? 'laravel_cloud';
+    }
+
+    /**
+     * Mark this tenant's storage as Pooled — its rows live in the named pool's shared schema, kept
+     * apart by row-level security (pooled-storage ticket 04). Pass null to clear the marker (the
+     * promotion job does, in the same write that clears the connection internals).
+     */
+    public function markPooled(?string $pool): self
+    {
+        $this->pool = $pool;
+
+        return $this;
+    }
+
+    public function isPooled(): bool
+    {
+        return is_string($this->pool) && $this->pool !== '';
+    }
+
+    /**
+     * The tenant's storage state, DERIVED from its markers — the only place the three are compared,
+     * so no caller reads `isolated_database` and `pool` side by side and gets the precedence wrong.
+     */
+    public function storage(): TenantStorage
+    {
+        if ($this->isIsolatedDatabase()) {
+            return TenantStorage::Isolated;
+        }
+
+        if ($this->isPooled()) {
+            return TenantStorage::Pooled;
+        }
+
+        return TenantStorage::Schema;
     }
 
     /** True while a tenant-facing upgrade request is pending operator action (ticket 03). */

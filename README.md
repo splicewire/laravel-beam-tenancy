@@ -18,9 +18,15 @@ carries the **designated system tenant** resolver it started life as.
   member controller. `CentralActivityLog` for the central-connection audit trail (the status
   timeline reads off it). The spatie status model is NOT named here — it is the host's, via
   `model-status.status_model`.
-- **Storage** — `HybridPostgresTenantDatabaseManager` and `PostgreSQLSchemaManager` for
-  shared-cluster schema-per-tenant, plus provisioning destinations for an Isolated Database on
-  Laravel Cloud or a customer-supplied host.
+- **Storage** — three states, derived by `Tenant::storage()` from the tenant's markers, never stored
+  as a fourth: **Pooled** (many tenants in one shared schema, rows kept apart by Postgres row-level
+  security — the `pool` marker; pooled-storage ticket 04), **Schema** (`HybridPostgresTenantDatabaseManager`
+  and `PostgreSQLSchemaManager`, shared-cluster schema-per-tenant — the default), and **Isolated
+  Database** (provisioning destinations on GCP Cloud SQL or a customer-supplied host). A new tenant's
+  state is decided by `Provisioning\DecideStorage` — explicit `requested_storage`, then the
+  `beam.tenancy.pooled.storage_resolver` seam, then `default_for_new_tenants` — which the pipeline
+  owner registers ahead of `CreateDatabase`. Vocabulary: it is a *storage state*; "isolation level" is
+  the satellite Org ladder and "tier" is billing.
 - **Bootstrappers** — `PermissionsTenancyBootstrapper` re-scopes spatie permissions to the active
   tenant and flushes the registrar cache on every switch; `CircuitTenancyBootstrapper` does the
   equivalent for circuits.

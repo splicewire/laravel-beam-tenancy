@@ -156,6 +156,9 @@ class TenantData extends BeamData
         /** A run gone quiet without a terminal status — drives "provisioning stalled — retry". */
         #[NotInList]
         public bool $isStalled = false,
+        /** Derived storage state — `pooled` / `schema` / `isolated` (pooled-storage ticket 04). Read-only: it changes by provisioning or migration, never by an edit. */
+        #[NotInList]
+        public ?string $storage = null,
     ) {}
 
     public static function project(Model $tenant): self
@@ -185,6 +188,7 @@ class TenantData extends BeamData
                 ->all(),
             isBusy: $tenant->isBusy(),
             isStalled: $tenant->provisioningIsStalled(),
+            storage: $tenant->storage()->value,
         );
     }
 }

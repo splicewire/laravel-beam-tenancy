@@ -14,3 +14,11 @@ Because it owns the domain→tenant mapping, this package also binds the
 (`Tenant::primaryHost()`) when a tenant context is initialized, and falls back to
 beam-sitemap's `config('app.url')` default when tenancy is absent. Cross-tenant
 sitemap aggregation is deferred to tower (ADR-0166 §5), not built here.
+
+**Pooled** — the third of a tenant's three storage states (`Tenant::storage()`: Pooled / Schema /
+Isolated Database): many tenants in one shared `pool_<name>` schema, rows kept apart by Postgres
+row-level security keyed on a session setting the connection applies; the discriminator column is
+filled by the database, never named by a model. Decided at creation by `DecideStorage`
+(requested → resolver seam → default); promoted, never downgraded. _Avoid_: isolation level (the
+satellite Org ladder, app ADR-0057), tier (billing), row-based tenancy (an application discriminator,
+which the runbook still forbids).

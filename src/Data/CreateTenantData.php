@@ -2,8 +2,12 @@
 
 namespace Splicewire\Beam\Tenancy\Data;
 
+use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Tenancy\TenantStorage;
+use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
  * The CREATE input shape for `tenants` — the `editData` escape hatch (ADR-0156 §83) that drives the
@@ -29,13 +33,59 @@ use Splicewire\Beam\Data\BeamData;
  * deliberate evidence — if it bites, the write-side seam graduates out of fog. **Do not quietly re-add
  * them here**; a `planSlug` in this class would name a beam-commerce concept inside beam-tenancy and
  * close the same dependency cycle the read-side seam guard exists to prevent.
+ *
+ * `storage` (pooled-storage ticket 04) is the one field ADDED since, and it passes the same test the
+ * three failed: it is a tenancy-core concept — which of the two creatable {@see TenantStorage} states
+ * the tenant lands in — naming no plan. The plan → storage mapping stays upward, behind
+ * `beam.tenancy.pooled.storage_resolver`. Null means "let the host decide" (resolver, then the
+ * configured default); `isolated` is rejected because isolation only ever arrives by migration.
  */
 #[TypeScript]
-class CreateTenantData extends BeamData
+class CreateTenantData extends BeamData implements MapsToModelAttributes
 {
     public function __construct(
         public string $slug,
         public ?string $name = null,
         public ?string $ownerEmail = null,
+        public ?string $storage = null,
     ) {}
+
+    /**
+     * Reached through `validateAndCreate()` — the REST provisioning endpoint's path — NOT through the
+     * schema surface, which reads no rules (the emitted form carries no enum; spec review, ticket 04).
+     * `DecideStorage` rejects an unknown or `isolated` request a second time, so a caller that skips
+     * validation still cannot land one.
+     *
+     * @return array<string, mixed>
+     */
+    public static function rules(ValidationContext $context): array
+    {
+        return [
+            'storage' => ['nullable', 'string', Rule::in(TenantStorage::creatableValues())],
+        ];
+    }
+
+    /**
+     * The declared write map (particle-doctrine: a class in an `editData:` slot declares it, never relies
+     * on the snake-case fallback). It matters here for one field: `storage` is a REQUEST, and the tenant
+     * attribute it lands on is `requested_storage` — consumed once by `DecideStorage` — not `storage`,
+     * which is `Tenant::storage()`, the derived STATE. The fallback mapper would have written the wrong
+     * key and the request would have vanished into the data blob with a 200. The slug doubles as the id
+     * because `tenancy.id_generator` is null estate-wide (slugs are ids).
+     *
+     * Create path, two-state: a null is omitted, never written — there is nothing to clear on a row
+     * that does not exist yet. `name` is left to the caller's default (tower ucfirsts the slug).
+     *
+     * @return array<string, mixed>
+     */
+    public function toModelAttributes(): array
+    {
+        return array_filter([
+            'id' => $this->slug,
+            'slug' => $this->slug,
+            'name' => $this->name,
+            'owner_email' => $this->ownerEmail,
+            'requested_storage' => $this->storage,
+        ], fn ($value) => $value !== null);
+    }
 }

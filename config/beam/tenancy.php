@@ -250,4 +250,49 @@ return [
         // `isolated_database` above, matching that block's own precedent.
         'extensions' => ['vector', 'fuzzystrmatch'],
     ],
+
+    /*
+     * POOLED STORAGE (pooled-storage ticket 04) — the third storage state, below schema-per-tenant:
+     * many tenants in one shared schema, rows kept apart by Postgres row-level security keyed on a
+     * session setting the connection applies on connect. The tenant's rows carry a discriminator
+     * column the DATABASE fills (`DEFAULT current_setting(...)`) — package models never name it.
+     * `Tenant::storage()` derives the state from the tenant's markers; nothing here is read for that.
+     * The privilege boundary is a dedicated non-owner role, not a setting (prior art: stancl/tenancy
+     * v4's Postgres RLS). Readers: `Provisioning\DecideStorage` (this ticket) and the hybrid
+     * manager's pooled branch plus `pools:migrate` (ticket 05).
+     */
+    'pooled' => [
+        // `schema_prefix` . the tenant's `pool` marker = the pool's schema name (`pool_default`).
+        'schema_prefix' => env('BEAM_TENANCY_POOL_PREFIX', 'pool_'),
+
+        // The pool a new pooled tenant lands in when nothing names another.
+        'default_pool' => env('BEAM_TENANCY_DEFAULT_POOL', 'default'),
+
+        // A tenant with no `requested_storage` and no resolver answer: pooled (true) or its own schema
+        // (false — the historical default, kept so upgrading this package changes nobody's
+        // provisioning). The flagship's own choice is an ADR there, not a default here.
+        'default_for_new_tenants' => (bool) env('BEAM_TENANCY_POOL_NEW_TENANTS', false),
+
+        // Class-string implementing `Contracts\ResolvesTenantStorage`, or null. The commerce-facing
+        // seam: a tier that knows plans binds one; this package cannot name a Plan (beam-commerce
+        // requires beam-tenancy — the same cycle `billing_account_model` above avoids).
+        'storage_resolver' => null,
+
+        // The dedicated NON-OWNER Postgres role pooled tenant connections authenticate as. The owner
+        // role runs pool migrations and is not subject to the policy unless `force_rls` is on. Null
+        // until a host provisions the role (ticket 07); the hybrid manager fails loud rather than
+        // connect a pooled tenant as the owner.
+        'rls_user' => [
+            'username' => env('BEAM_TENANCY_RLS_USERNAME'),
+            'password' => env('BEAM_TENANCY_RLS_PASSWORD'),
+        ],
+
+        // `FORCE ROW LEVEL SECURITY` — makes the OWNER subject to the policy too, so the owner then
+        // needs `BYPASSRLS` to migrate. Managed Postgres (Cloud SQL) grants no superuser and so cannot
+        // grant it; off by default for that reason, on where the owner can hold it.
+        'force_rls' => (bool) env('BEAM_TENANCY_FORCE_RLS', false),
+
+        // The namespaced Postgres setting the policy keys on. Must carry a dot.
+        'session_setting' => env('BEAM_TENANCY_RLS_SETTING', 'app.tenant_id'),
+    ],
 ];

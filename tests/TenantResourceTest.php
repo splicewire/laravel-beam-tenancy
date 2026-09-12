@@ -6,6 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Rushing\Graphine\Testing\SeamGuard;
 use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
@@ -14,6 +15,7 @@ use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Data\CreateTenantData;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Tenant;
+use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
  * The neutral `tenants` particle resource, exercised through the registry and the projection —
@@ -153,7 +155,7 @@ it('carries the nav placement that descended from tower with the teardown', func
         ->and($resource->routeName)->toBe('tenants.index');
 });
 
-it('declares a create form of THREE props, and the three it does not carry are the point', function () {
+it('declares a create form of FOUR props, and the three it does not carry are the point', function () {
     $resource = AttributedParticleDiscovery::resourceFromAttribute(TenantData::class);
 
     expect($resource->editData)->toBe(CreateTenantData::class);
@@ -174,7 +176,33 @@ it('declares a create form of THREE props, and the three it does not carry are t
     // So the operator create form no longer selects a plan or a scaffold pack, and a tenant is created
     // plan-less and subscribed separately. The loss is the evidence that graduates the write-side seam
     // out of the map's fog — do not quietly restore it.
-    expect($props)->toBe(['slug', 'name', 'ownerEmail']);
+    //
+    // `storage` (pooled-storage ticket 04) is the one addition since, and it passes the test the three
+    // failed: it names a tenancy-core state, not a plan.
+    expect($props)->toBe(['slug', 'name', 'ownerEmail', 'storage']);
+});
+
+it('declares its write map, and maps `storage` onto `requested_storage` — the request, not the derived state', function () {
+    // The snake-case fallback would write `storage`, a key DecideStorage never reads, and the operator's
+    // "pooled" would vanish into the data blob behind a 200 (standards review, pooled-storage 04).
+    expect(new CreateTenantData(slug: 'acme'))->toBeInstanceOf(MapsToModelAttributes::class);
+
+    expect((new CreateTenantData(slug: 'acme', storage: 'pooled'))->toModelAttributes())
+        ->toBe(['id' => 'acme', 'slug' => 'acme', 'requested_storage' => 'pooled']);
+
+    // Create path: a null is omitted, never written.
+    expect((new CreateTenantData(slug: 'acme', name: 'Acme'))->toModelAttributes())
+        ->toBe(['id' => 'acme', 'slug' => 'acme', 'name' => 'Acme']);
+});
+
+it('refuses `isolated` and unknown storage on the validated create path — isolation arrives only by migration', function () {
+    expect(fn () => CreateTenantData::validateAndCreate(['slug' => 'acme', 'storage' => 'isolated']))
+        ->toThrow(ValidationException::class);
+    expect(fn () => CreateTenantData::validateAndCreate(['slug' => 'acme', 'storage' => 'sharded']))
+        ->toThrow(ValidationException::class);
+
+    expect(CreateTenantData::validateAndCreate(['slug' => 'acme', 'storage' => 'pooled'])->storage)->toBe('pooled')
+        ->and(CreateTenantData::validateAndCreate(['slug' => 'acme'])->storage)->toBeNull();
 });
 
 it('names no commerce symbol in the create form either', function () {
@@ -257,13 +285,14 @@ it('emits ISO-8601 strings, not raw Carbon', function () {
         ->and($data->createdAt)->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/');
 });
 
-it('carries exactly 17 props — the 9 OOTB plus ticket 03 §A1\'s 8 owner-local', function () {
+it('carries exactly 18 props — the 9 OOTB, ticket 03 §A1\'s 8 owner-local, and pooled-storage 04\'s `storage`', function () {
     $props = array_map(
         fn ($p) => $p->getName(),
         (new ReflectionClass(TenantData::class))->getConstructor()->getParameters()
     );
 
-    expect($props)->toHaveCount(17)
+    expect($props)->toHaveCount(18)
+        ->and($props)->toContain('storage')
         // The 8 the fold added, named so a future deletion has to argue with this list.
         ->and($props)->toContain('parentTenantId', 'llmConfig', 'scaffoldPackSlugs', 'statusChannel', 'primaryHost', 'statuses', 'isBusy', 'isStalled')
         // Still not the commerce 5 — those arrive as a contribution, and a seam guard in this suite
