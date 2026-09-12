@@ -15,6 +15,7 @@
         "illuminate/database": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
         "rushing/laravel-popcorn": "dev-main",
+        "rushing/laravel-postgres-rls": "dev-main",
         "spatie/laravel-activitylog": "^4.0|^5.0",
         "spatie/laravel-data": "^4.0|^5.0",
         "spatie/laravel-model-status": "*",
@@ -69,6 +70,7 @@
         "package-topology": {
             "because": "beam-tenancy is the tenancy substrate. It depends DOWN on beam and on beam-accounts (Tenant IS a TeamContract and uses the account engine's HasMembers/Role) and is depended ON by beam-commerce, so the commerce edge can only ever run one way: a tenancy->commerce require would close a cycle. Tenant's billing-account relation therefore resolves through the beam.tenancy.billing_account_model seam rather than naming a commerce class.",
             "mustRequire": [
+                "rushing/laravel-postgres-rls",
                 "splicewire/laravel-beam",
                 "splicewire/laravel-beam-accounts",
                 "splicewire/laravel-beam-workflows"
@@ -94,6 +96,20 @@
         }
     },
     "repositories": [
+        {
+            "type": "path",
+            "url": "../../rushing/laravel-postgres-rls",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "path",
+            "url": "../../rushing/laravel-data-nav",
+            "options": {
+                "symlink": true
+            }
+        },
         {
             "type": "path",
             "url": "../../rushing/codegen",

@@ -19,6 +19,7 @@ use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Events;
 use Stancl\Tenancy\Features\TenantConfig;
 use Stancl\Tenancy\Listeners;
+use Stancl\Tenancy\Tenancy;
 use Stancl\Tenancy\TenantDatabaseManagers\SQLiteDatabaseManager;
 
 /**
@@ -136,6 +137,13 @@ trait InteractsWithTenancy
      */
     protected function wireTenancyEvents(): void
     {
+        // ⚠️ stancl's provider binds `Tenancy` as a SINGLETON and this harness does not boot it. Unbound,
+        // `tenancy()` hands back a fresh instance per call: `initialize()` marks one object initialized,
+        // `end()` finds another that is not, returns before `TenancyEnded`, and the default connection
+        // stays on the tenant — the next "central" assertion runs as the previous tenant. Measured in
+        // beam-tenancy's Postgres harness (pooled-storage ticket 05).
+        $this->app->singleton(Tenancy::class);
+
         Event::listen(Events\TenancyInitialized::class, Listeners\BootstrapTenancy::class);
         Event::listen(Events\TenancyEnded::class, Listeners\RevertToCentralContext::class);
     }

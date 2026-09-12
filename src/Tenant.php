@@ -22,6 +22,7 @@ use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
+use Splicewire\Beam\Tenancy\Pools\PoolMigrator;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
 use Splicewire\Beam\Workflows\Facades\Status;
@@ -404,6 +405,10 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      */
     public function markPooled(?string $pool): self
     {
+        if ($pool !== null) {
+            PoolMigrator::schemaNameFor($pool); // the one grammar; throws on a name that cannot be a schema
+        }
+
         $this->pool = $pool;
 
         return $this;
@@ -412,6 +417,12 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public function isPooled(): bool
     {
         return is_string($this->pool) && $this->pool !== '';
+    }
+
+    /** The pool's Postgres schema name (one grammar, one writer: {@see PoolMigrator::schemaNameFor()}), or null when not pooled. */
+    public function poolSchema(): ?string
+    {
+        return $this->isPooled() ? PoolMigrator::schemaNameFor((string) $this->pool) : null;
     }
 
     /**

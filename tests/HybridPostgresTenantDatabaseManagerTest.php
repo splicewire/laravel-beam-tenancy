@@ -15,7 +15,7 @@ function makeHybridManager(): array
     $customerSupplied = Mockery::mock(CustomerSuppliedDatabaseDestination::class);
     $gcpCloudSql = Mockery::mock(GcpCloudSqlDestination::class);
 
-    $manager = new HybridPostgresTenantDatabaseManager($schemaManager, $laravelCloud, $customerSupplied, $gcpCloudSql);
+    $manager = new HybridPostgresTenantDatabaseManager($schemaManager, $laravelCloud, $customerSupplied, $gcpCloudSql, Mockery::mock(Splicewire\Beam\Tenancy\Pools\PoolMigrator::class));
 
     return [$manager, $schemaManager, $laravelCloud, $customerSupplied, $gcpCloudSql];
 }

@@ -24,6 +24,10 @@ use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
+use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrate;
+use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrateFresh;
+use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsRollback;
+use Splicewire\Beam\Tenancy\Commands\PoolsMigrate;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
@@ -64,6 +68,16 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
 {
     public function register(): void
     {
+        // pooled-storage ticket 05: stancl's `tenants:migrate` learns to skip pooled tenants. A
+        // container EXTENSION rather than a second `commands()` registration, because Artisan keeps
+        // whichever same-named registration booted last and provider order is not this package's to
+        // decide; `extend` applies at resolve time whatever the order.
+        $this->app->extend(\Stancl\Tenancy\Commands\Migrate::class, fn ($command, $app) => $app->make(PooledAwareTenantsMigrate::class));
+        // …and its two destructive siblings REFUSE a pooled tenant: a wipe or rollback of the tenant
+        // connection is a wipe or rollback of the whole pool.
+        $this->app->extend(\Stancl\Tenancy\Commands\Rollback::class, fn ($command, $app) => $app->make(PooledAwareTenantsRollback::class));
+        $this->app->extend(\Stancl\Tenancy\Commands\MigrateFresh::class, fn ($command, $app) => $app->make(PooledAwareTenantsMigrateFresh::class));
+
         parent::register();
 
         $this->registerMachineIdentityKinds();
@@ -261,6 +275,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             // see `config/beam/tenancy.php` and reach keys at `config('beam.tenancy.*')`.
             ->name('laravel-beam-tenancy')
             ->hasConfigFile(['beam/tenancy'])
+            // pooled-storage ticket 05: pools are migrated once, as the owner, never per tenant.
+            ->hasCommand(PoolsMigrate::class)
             // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
             // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
             // and package-tools' generateMigrationName timestamps them in listed order.

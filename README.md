@@ -195,3 +195,30 @@ with a null-object default, never by importing the class.
 > Keep them apart. The `parent_tenant_id` column lives here; the brokering behaviour does not.
 
 **Cross-tenant aggregation** is deferred to tower (ADR-0166 §5), not bound here.
+
+## Pooled storage operations (pooled-storage ticket 05)
+
+A pool is a shared schema (`pool_<name>`) whose tables carry a database-filled discriminator and a
+row-level-security policy; pooled tenants connect as a dedicated **non-owner** Postgres role with the
+session setting the policy keys on, applied by `rushing/laravel-postgres-rls`'s connector on connect and
+reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-not-a-model-discriminator.md`.
+
+1. **Provision the role** (once per cluster; never by a request): `CREATE ROLE beam_rls LOGIN PASSWORD '…'`.
+   Set `BEAM_TENANCY_RLS_USERNAME` / `BEAM_TENANCY_RLS_PASSWORD`. The hybrid manager refuses to connect
+   a pooled tenant while these are unset — connecting as the owner would read every tenant's rows.
+2. **Migrate the pool**: `php artisan splicewire:beam:tenancy:pools:migrate [pool]` — creates the schema
+   if absent, removes the policies for the window, runs the same migration paths `tenants:migrate` would,
+   re-prepares (column, index, hashed policy, unique-index rewrite), re-grants the role. Once per pool, as
+   the owner, never inside a tenant frame. The first pooled tenant of a pool runs the same path on creation.
+3. **`tenants:migrate` skips pooled tenants** by name (and never fans out on an empty list); migrate the
+   pool instead. **`tenants:rollback` and `tenants:migrate-fresh` refuse** a pooled tenant — the tenant
+   connection is the whole pool. A hand-run `migrate --database=…` against a pool connection is not
+   guarded; prepare afterwards with `pools:migrate`.
+4. **Removing a pooled tenant removes its rows** from inside its own frame, policy-scoped.
+
+`BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
+`BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.
+
+Accepted hazards of the base tier: foreign-key checks bypass RLS; sequences are pool-global; backups are
+pool-granular. The Postgres-gated suite (`tests/Postgres/`, `PG_TEST_DATABASE=…`) proves the mechanism;
+the sqlite suite proves the wiring with fakes.

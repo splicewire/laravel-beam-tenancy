@@ -7,6 +7,7 @@ use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseTrustStore;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
+use Splicewire\Beam\Tenancy\Pools\PoolMigrator;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 
@@ -40,6 +41,8 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
         protected IsolatedDatabaseDestination $laravelCloud,
         protected CustomerSuppliedDatabaseDestination $customerSupplied,
         protected GcpCloudSqlDestination $gcpCloudSql,
+        // Autowired: stancl's `DatabaseConfig::manager()` resolves this class through the container.
+        protected PoolMigrator $poolMigrator,
     ) {}
 
     public function setConnection(string $connection): void
@@ -62,6 +65,10 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
      */
     public function createDatabase(TenantWithDatabase $tenant): bool
     {
+        if ($this->pooled($tenant)) {
+            return $this->joinPool($tenant);
+        }
+
         if (! $this->isolated($tenant)) {
             return $this->schemaManager->createDatabase($tenant);
         }
@@ -93,6 +100,10 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
 
     public function deleteDatabase(TenantWithDatabase $tenant): bool
     {
+        if ($this->pooled($tenant)) {
+            return $this->deletePooledRows($tenant);
+        }
+
         if (! $this->isolated($tenant)) {
             return $this->schemaManager->deleteDatabase($tenant);
         }
@@ -141,6 +152,13 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
      */
     public function databaseExists(string $name): bool
     {
+        // A pool schema (pooled-storage ticket 05) is a real schema on the central cluster, so the
+        // real check applies — it is what `pools:migrate` creates, and a pooled tenant bootstrapping
+        // against a pool nobody migrated should 404 exactly like a schema tenant would.
+        if ($this->isPoolName($name)) {
+            return $this->schemaManager->databaseExists($name);
+        }
+
         if (! str_starts_with($name, config('tenancy.database.prefix', ''))) {
             return true;
         }
@@ -150,6 +168,29 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
 
     public function makeConnectionConfig(array $baseConfig, string $databaseName): array
     {
+        // POOLED (pooled-storage ticket 05). The signal is the `session_settings` key, which only a
+        // pooled tenant carries (`createDatabase()` sets the `db_session_settings` internal, and
+        // stancl's `tenantConfig()` merges it in under that name) — again a config key rather than a
+        // tenant, because this hook receives none. Three things happen to the connection: the pool
+        // schema is spliced into `search_path` exactly like a tenant schema (the `,public` fall-through
+        // is load-bearing, see `TenancyConnections`); the settings ride through to the connector
+        // (`rushing/laravel-postgres-rls`), which applies them on connect and reconnect; and the
+        // credentials are swapped to the dedicated NON-OWNER role, which is the privilege boundary —
+        // a pooled tenant connecting as the owner would read every tenant's rows, so a missing role
+        // is a hard stop rather than a fallback.
+        if (isset($baseConfig['session_settings'])) {
+            $user = config('beam.tenancy.pooled.rls_user', []);
+            if (empty($user['username'])) {
+                throw new \RuntimeException(
+                    "Pooled storage needs a non-owner Postgres role: set beam.tenancy.pooled.rls_user (BEAM_TENANCY_RLS_USERNAME/PASSWORD) before connecting a pooled tenant to '{$databaseName}'."
+                );
+            }
+            $baseConfig['username'] = $user['username'];
+            $baseConfig['password'] = $user['password'] ?? '';
+
+            return $this->schemaManager->makeConnectionConfig($baseConfig, $databaseName);
+        }
+
         // stancl's contract doesn't pass $tenant here — $baseConfig already has stancl's
         // DatabaseConfig::tenantConfig() merged in, which only ever carries a `host` key
         // when createDatabase() above set tenancy_db_host (an Isolated-Database tenant); a
@@ -172,6 +213,100 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
     protected function isolated(TenantWithDatabase $tenant): bool
     {
         return method_exists($tenant, 'isIsolatedDatabase') && $tenant->isIsolatedDatabase();
+    }
+
+    /**
+     * POOLED creation (pooled-storage ticket 05): nothing per-tenant is created. The pool is ensured
+     * — created, migrated and prepared once, by the one path that ever does that ({@see PoolMigrator}),
+     * so the first tenant of a pool pays the schema and every later one pays nothing — and the tenant
+     * is pointed at it: `db_name` becomes the pool schema (overwriting the `tenant_<id>` stancl's
+     * `makeCredentials()` wrote a moment ago, the same overwrite the isolated branch does), and
+     * `db_session_settings` carries the key the policy scopes on. That second internal is what makes
+     * `makeConnectionConfig()` recognise a pooled connection without a tenant in hand.
+     */
+    protected function joinPool(TenantWithDatabase $tenant): bool
+    {
+        /** @var Tenant $tenant */
+        $this->poolMigrator->ensure((string) $tenant->pool);
+
+        $tenant->setInternal('db_name', $tenant->poolSchema());
+        $tenant->setInternal('db_session_settings', [
+            (string) config('beam.tenancy.pooled.session_setting', 'app.tenant_id') => (string) $tenant->getTenantKey(),
+        ]);
+
+        if ($tenant->exists) {
+            $tenant->save();
+        }
+
+        return true;
+    }
+
+    /**
+     * A pooled tenant owns no schema to drop — it owns ROWS, in every table of the pool. They are
+     * deleted from INSIDE the tenant's own frame, as the non-owner role with the session setting
+     * bound, so the row-level-security policy scopes every `DELETE` to this tenant and a bug here
+     * structurally cannot reach a neighbour's rows (pooled-storage ticket 05). Never as the owner,
+     * never with a `WHERE tenant_id = …` the application has to get right. `migrations` is the
+     * pool's, not the tenant's, and is skipped; other tables are deleted children-first by retrying
+     * the ones a foreign key refuses until none is left — the pool has no ordering knowledge of
+     * its own and the set is small per tenant.
+     */
+    protected function deletePooledRows(TenantWithDatabase $tenant): bool
+    {
+        /** @var Tenant $tenant */
+        $tenant->run(function () use ($tenant) {
+            // `tenant` is the name stancl reserves for the connection its bootstrapper builds
+            // (`DatabaseManager::createTenantConnection()`), which is the frame `run()` opened.
+            $connection = \Illuminate\Support\Facades\DB::connection('tenant');
+            $schema = $tenant->poolSchema();
+            $tables = array_map(
+                fn ($row) => $row->table_name,
+                $connection->select(
+                    "select table_name from information_schema.tables where table_schema = ? and table_type = 'BASE TABLE' and table_name <> 'migrations'",
+                    [$schema]
+                )
+            );
+
+            // One transaction: a cyclic or RESTRICT foreign key that survives every pass must leave the
+            // tenant whole, not half-removed.
+            $connection->transaction(function () use ($connection, $schema, $tables, $tenant) {
+                $remaining = $tables;
+                $passes = 0;
+                while ($remaining !== [] && $passes < count($tables) + 1) {
+                    $refused = [];
+                    foreach ($remaining as $table) {
+                        try {
+                            $connection->table($schema.'.'.$table)->delete();
+                        } catch (\Illuminate\Database\QueryException $e) {
+                            if (($e->errorInfo[0] ?? null) !== '23503') { // foreign_key_violation
+                                throw $e;
+                            }
+                            $refused[] = $table;
+                        }
+                    }
+                    $remaining = $refused;
+                    $passes++;
+                }
+
+                if ($remaining !== []) {
+                    throw new \RuntimeException("Pooled rows for tenant '{$tenant->getTenantKey()}' could not be deleted from: ".implode(', ', $remaining));
+                }
+            });
+        });
+
+        return true;
+    }
+
+    protected function pooled(TenantWithDatabase $tenant): bool
+    {
+        return method_exists($tenant, 'isPooled') && $tenant->isPooled();
+    }
+
+    protected function isPoolName(string $name): bool
+    {
+        $prefix = (string) config('beam.tenancy.pooled.schema_prefix', 'pool_');
+
+        return $prefix !== '' && str_starts_with($name, $prefix);
     }
 
     /**
