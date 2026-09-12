@@ -203,9 +203,11 @@ row-level-security policy; pooled tenants connect as a dedicated **non-owner** P
 session setting the policy keys on, applied by `rushing/laravel-postgres-rls`'s connector on connect and
 reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-not-a-model-discriminator.md`.
 
-1. **Provision the role** (once per cluster; never by a request): `CREATE ROLE beam_rls LOGIN PASSWORD '…'`.
-   Set `BEAM_TENANCY_RLS_USERNAME` / `BEAM_TENANCY_RLS_PASSWORD`. The hybrid manager refuses to connect
-   a pooled tenant while these are unset — connecting as the owner would read every tenant's rows.
+1. **Provision the role** (once per cluster; never by a request): set `BEAM_TENANCY_RLS_USERNAME` /
+   `BEAM_TENANCY_RLS_PASSWORD`, then `php artisan splicewire:beam:tenancy:pools:role` — creates the role
+   with `LOGIN`, no `SUPERUSER`, no `BYPASSRLS` (or resets its password), on the central connection, whose
+   user needs `CREATEROLE`. The hybrid manager refuses to connect a pooled tenant while the env is unset —
+   connecting as the owner would read every tenant's rows.
 2. **Migrate the pool**: `php artisan splicewire:beam:tenancy:pools:migrate [pool]` — creates the schema
    if absent, removes the policies for the window, runs the same migration paths `tenants:migrate` would,
    re-prepares (column, index, hashed policy, unique-index rewrite), re-grants the role. Once per pool, as

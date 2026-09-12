@@ -97,3 +97,16 @@ it('passes the pooled-storage doctor audits over a prepared pool, and fails cove
     expect($failed)->not->toBeEmpty()
         ->and($failed->pluck('detail')->implode(' '))->toContain('pooled_notes');
 });
+
+it('provisions the non-owner role idempotently — LOGIN, no SUPERUSER, no BYPASSRLS — and resets its password on rerun', function () {
+    config(['beam.tenancy.pooled.rls_user' => ['username' => 'beam_tenancy_role_probe', 'password' => 'first']]);
+    Artisan::registerCommand(app(Splicewire\Beam\Tenancy\Commands\PoolsRole::class));
+
+    $this->artisan('splicewire:beam:tenancy:pools:role')->expectsOutputToContain('Created role beam_tenancy_role_probe')->assertSuccessful();
+    $this->artisan('splicewire:beam:tenancy:pools:role')->expectsOutputToContain('Reset password of existing role')->assertSuccessful();
+
+    $role = DB::selectOne('select rolcanlogin, rolsuper, rolbypassrls from pg_roles where rolname = ?', ['beam_tenancy_role_probe']);
+    expect($role->rolcanlogin)->toBeTrue()->and($role->rolsuper)->toBeFalse()->and($role->rolbypassrls)->toBeFalse();
+
+    DB::statement('drop role beam_tenancy_role_probe');
+});

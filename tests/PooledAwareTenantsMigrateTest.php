@@ -44,3 +44,12 @@ it('refuses to roll back or wipe a pooled tenant — the schema is the whole poo
         ->expectsOutputToContain('Refusing to wipe and re-migrate pooled tenant(s)')
         ->assertFailed();
 });
+
+it('refuses to provision the pooled role when none is configured', function () {
+    config(['beam.tenancy.pooled.rls_user' => ['username' => null, 'password' => null]]);
+    Artisan::registerCommand(app(Splicewire\Beam\Tenancy\Commands\PoolsRole::class));
+
+    $this->artisan('splicewire:beam:tenancy:pools:role')
+        ->expectsOutputToContain('BEAM_TENANCY_RLS_USERNAME')
+        ->assertFailed();
+});

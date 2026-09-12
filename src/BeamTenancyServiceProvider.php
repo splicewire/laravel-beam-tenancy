@@ -28,6 +28,7 @@ use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrateFresh;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsRollback;
 use Splicewire\Beam\Tenancy\Commands\PoolsMigrate;
+use Splicewire\Beam\Tenancy\Commands\PoolsRole;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
@@ -279,6 +280,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             ->hasConfigFile(['beam/tenancy'])
             // pooled-storage ticket 05: pools are migrated once, as the owner, never per tenant.
             ->hasCommand(PoolsMigrate::class)
+            ->hasCommand(PoolsRole::class)
             // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
             // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
             // and package-tools' generateMigrationName timestamps them in listed order.
