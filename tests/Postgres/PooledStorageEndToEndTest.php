@@ -74,3 +74,26 @@ it('runs the pools:migrate command twice idempotently and skips pooled tenants i
         ->expectsOutputToContain('alpha — pooled (pool_default); skipped')
         ->assertSuccessful();
 });
+
+it('passes the pooled-storage doctor audits over a prepared pool, and fails coverage once a table loses its policy', function () {
+    provisionPooled('alpha');
+    provisionPooled('bravo');
+
+    $findings = app(Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit::class)->run();
+    $byCheck = collect($findings)->groupBy('check')->map(fn ($f) => $f->pluck('status')->unique()->values()->all());
+
+    expect($byCheck->keys()->all())->not->toBeEmpty()
+        ->and(collect($findings)->filter(fn ($f) => $f->status === Rushing\Doctor\DoctorStatus::Fail)->map(fn ($f) => $f->check.': '.$f->detail)->all())->toBe([])
+        ->and(array_key_exists('beam_pool_probe_default', config('database.connections')))->toBeFalse('probe purged');
+
+    // The markers audit passes too: both tenants carry their own key and the pool schema.
+    expect(app(Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit::class)->run()[0]->status)->toBe(Rushing\Doctor\DoctorStatus::Pass);
+
+    // Break one invariant the way an operator could: RLS switched off on one pool table.
+    DB::statement('alter table pool_default.pooled_notes disable row level security');
+    $failed = collect(app(Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit::class)->run())
+        ->filter(fn ($f) => $f->status === Rushing\Doctor\DoctorStatus::Fail);
+
+    expect($failed)->not->toBeEmpty()
+        ->and($failed->pluck('detail')->implode(' '))->toContain('pooled_notes');
+});

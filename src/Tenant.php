@@ -422,7 +422,12 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     /** The pool's Postgres schema name (one grammar, one writer: {@see PoolMigrator::schemaNameFor()}), or null when not pooled. */
     public function poolSchema(): ?string
     {
-        return $this->isPooled() ? PoolMigrator::schemaNameFor((string) $this->pool) : null;
+        return $this->isPooled() ? self::poolSchemaFor((string) $this->pool) : null;
+    }
+
+    public static function poolSchemaFor(string $pool): string
+    {
+        return PoolMigrator::schemaNameFor($pool);
     }
 
     /**

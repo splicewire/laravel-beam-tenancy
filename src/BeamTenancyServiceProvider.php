@@ -34,6 +34,8 @@ use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
+use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
+use Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
@@ -439,6 +441,23 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 MachineIdentityOnMembershipPivotAudit::class,
+            );
+
+            // GATES (pooled-storage ticket 06): a pooled tenant whose session-setting marker names
+            // another tenant's key reads that tenant's rows on every request with a 200. Inconclusive
+            // over zero pooled tenants, so a host with none is not held by it.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                PooledTenantMarkersAudit::class,
+                gate: true,
+            );
+
+            // GATES: the four rushing/laravel-postgres-rls audits over every pool, through a probe
+            // connection per pool (see the wrapper's docblock). Inconclusive over zero pooled tenants.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                PooledStorageAudit::class,
+                gate: true,
             );
         }
 

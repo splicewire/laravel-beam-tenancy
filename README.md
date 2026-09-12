@@ -215,6 +215,11 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
    connection is the whole pool. A hand-run `migrate --database=…` against a pool connection is not
    guarded; prepare afterwards with `pools:migrate`.
 4. **Removing a pooled tenant removes its rows** from inside its own frame, policy-scoped.
+5. **The doctor gates on it.** `PooledTenantMarkersAudit` checks every pooled tenant's central markers
+   (its own key under the session setting, its pool schema as `db_name`); `PooledStorageAudit` runs the
+   four `rushing/laravel-postgres-rls` audits — coverage, role, owner exposure, frame — over every pool,
+   through a probe connection built the way the hybrid manager builds a pooled tenant's. Both are
+   inconclusive over zero pooled tenants.
 
 `BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
 `BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.

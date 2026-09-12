@@ -88,7 +88,7 @@ class PoolMigrator
             return $report;
         } finally {
             DB::purge($name);
-            Config::offsetUnset("database.connections.{$name}");
+            self::forgetConnection($name);
         }
     }
 
@@ -178,5 +178,16 @@ class PoolMigrator
     protected function quote(string $identifier): string
     {
         return '"'.str_replace('"', '""', $identifier).'"';
+    }
+
+    /**
+     * Remove a transient connection's config outright — the repository's `offsetUnset` leaves a null
+     * entry behind, which `ConnectionConfig` and `array_key_exists` both still see.
+     */
+    protected static function forgetConnection(string $name): void
+    {
+        $connections = (array) Config::get('database.connections', []);
+        unset($connections[$name]);
+        Config::set('database.connections', $connections);
     }
 }
