@@ -84,6 +84,7 @@ class PooledStorageAudit implements DoctorAudit
                         ...(new CoverageAudit($this->db, $scope))->run(),
                         ...(new RoleAudit($this->db, $scope, $connections))->run(),
                         ...(new OwnerExposureAudit($this->db, $scope, $connections))->run(),
+                        ...$this->centralAccess($pools, $probes, (string) $server),
                     ]
                     : (new FrameAudit($this->db, $scope, $connections))->run())];
             }
@@ -119,6 +120,45 @@ class PooledStorageAudit implements DoctorAudit
             exclude: (array) ($rls['exclude'] ?? ['migrations']),
             force: (bool) Config::get('beam.tenancy.pooled.force_rls', false),
         );
+    }
+
+    /**
+     * GATE: can each probe's role read the central tables a tenant frame falls through to? A schema tenant's
+     * owner connection always can; a pooled role can only once pools:migrate granted it (`central_access`).
+     * Measured with `has_table_privilege` on the central catalogue — no probe connection opened.
+     *
+     * @param  list<string>  $pools
+     * @param  array<string, string>  $probes
+     * @return list<Finding>
+     */
+    protected function centralAccess(array $pools, array $probes, string $server): array
+    {
+        $check = 'tenancy.pooled-storage.central-access';
+
+        if (! Config::get('beam.tenancy.pooled.central_access', true)) {
+            return [];
+        }
+
+        $findings = [];
+
+        foreach ($pools as $pool) {
+            // A pool on another server has no central `public` behind it (ADR-0002).
+            if (app(PoolRegistry::class)->remoteConnectionFor($pool) !== null) {
+                continue;
+            }
+
+            $role = (string) Config::get("database.connections.{$probes[$pool]}.username");
+            $missing = array_map(fn ($row) => $row->relname, $this->db->connection($server)->select(
+                "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r', 'p') and not has_table_privilege(?, c.oid, 'SELECT, INSERT, UPDATE, DELETE') order by c.relname",
+                [$role]
+            ));
+
+            $findings[] = $missing === []
+                ? Finding::pass($check, "Pool '{$pool}': role {$role} has DML on every central table in public, as a schema tenant's connection does.")
+                : Finding::fail($check, sprintf("Pool '%s': role %s lacks DML on %d central table(s) a tenant frame falls through to (%s%s) — an unpinned central read in a pooled tenant is `permission denied`. Run splicewire:beam:tenancy:pools:migrate %s.", $pool, $role, count($missing), implode(', ', array_slice($missing, 0, 5)), count($missing) > 5 ? ', …' : '', $pool));
+        }
+
+        return $findings;
     }
 
     /**

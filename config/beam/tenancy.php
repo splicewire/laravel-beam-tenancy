@@ -292,6 +292,14 @@ return [
         // grant it; off by default for that reason, on where the owner can hold it.
         'force_rls' => (bool) env('BEAM_TENANCY_FORCE_RLS', false),
 
+        // Grant the non-owner role the same DML on the central `public` schema that a schema tenant's
+        // connection already has (it authenticates as the owner). A tenant frame reaches central-only tables
+        // through the `"<schema>,public"` search_path — `tenant_users`, `plans`, `lunar_products` — and
+        // without this every such read in a POOLED frame is `permission denied` (measured 2026-09-13). RLS
+        // scopes the pool's rows; it never scoped central tables for any tenant. Applied by pools:migrate on
+        // the central server only (a pool on another server has no central `public` behind it).
+        'central_access' => (bool) env('BEAM_TENANCY_POOL_CENTRAL_ACCESS', true),
+
         // The namespaced Postgres setting the policy keys on. Must carry a dot.
         'session_setting' => env('BEAM_TENANCY_RLS_SETTING', 'app.tenant_id'),
 

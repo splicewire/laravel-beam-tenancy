@@ -75,6 +75,12 @@ and isolated tenants; and its plain `SET` does not survive a reconnect.
   preparer and `CoverageAudit`); sequences are pool-global (ids reveal
   existence by gap — 81 serial columns in the shared set, ticket 01 census); backups are
   pool-granular.
+- Central tables stay reachable (amended 2026-09-13): a tenant frame reads central-only tables through the
+  `,public` search_path fall-through, which a schema tenant can do because it connects as the owner. The
+  non-owner role had no privileges there, so every such read in a pooled frame was `permission denied`
+  (measured on the flagship: `tenant_users`, `plans`, `lunar_products`). `pools:migrate` now grants it the
+  same DML on `public`, with default privileges following the migrating user; `central_access` turns it off.
+  This is parity with Schema, not a widening: isolation between pooled tenants is the policy on pool tables.
 - On a dev box every connection is a superuser (`postgres`, `root`), and superusers bypass RLS
   whatever FORCE says, so pooled isolation is **not exercised** unless a non-superuser role is
   used. The doctor audits (map tickets 03/06) exist for that reason.

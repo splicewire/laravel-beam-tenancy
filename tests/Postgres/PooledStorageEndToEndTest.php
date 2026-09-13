@@ -223,3 +223,25 @@ it('migrates a later foreign key into an already-prepared pool table, scoped', f
     expect(DB::table('pooled_c_labels')->value('tenant_id'))->toBe('alpha');
     tenancy()->end();
 });
+
+it('lets a pooled frame read and write central tables through the public fall-through, as a schema tenant can', function () {
+    $alpha = provisionPooled('alpha');
+
+    tenancy()->initialize($alpha);
+    expect(DB::connection('tenant')->selectOne('select current_user as u')->u)->toBe(PostgresTestCase::RLS_ROLE)
+        ->and(DB::table('tenants')->where('id', 'alpha')->exists())->toBeTrue('central tenants row, unpinned');
+    tenancy()->end();
+
+    // A central table created AFTER the pool was migrated is covered by the default privileges.
+    Illuminate\Support\Facades\Schema::create('central_created_later', fn ($table) => $table->id());
+    tenancy()->initialize($alpha);
+    expect(DB::table('central_created_later')->insertGetId([]))->toBe(1);
+    tenancy()->end();
+
+    $fails = fn () => collect(app(Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit::class)->run())
+        ->filter(fn ($f) => $f->check === 'tenancy.pooled-storage.central-access')->map(fn ($f) => $f->status)->values()->all();
+    expect($fails())->toBe([Rushing\Doctor\DoctorStatus::Pass]);
+
+    DB::statement('revoke all on table public.tenants from '.PostgresTestCase::RLS_ROLE);
+    expect($fails())->toBe([Rushing\Doctor\DoctorStatus::Fail]);
+});

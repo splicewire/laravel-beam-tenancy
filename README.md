@@ -250,6 +250,11 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
 `BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
 `BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.
 
+A pooled tenant reaches central tables through `"pool_<name>,public"` exactly as a schema tenant does
+through `"tenant_<id>,public"`: `pools:migrate` grants the non-owner role the same DML on `public` that a
+schema tenant's owner connection has (`beam.tenancy.pooled.central_access`, default on; central server only),
+and `PooledStorageAudit` fails when it is missing. RLS scopes the pool's rows; it never scoped central tables.
+
 Keys in a pool are per tenant: the preparer rewrites primary keys and unique indexes to lead with
 `tenant_id` and foreign keys between pool tables to carry it on both sides, so a central row copied into
 every tenant keeps its id in each and a reference to another tenant's row is refused. Upserts keep naming

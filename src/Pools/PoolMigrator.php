@@ -35,7 +35,9 @@ use Splicewire\Beam\Tenancy\Support\TenancyConnections;
  *      Step 3's connection binds a setting, so the package's scoped schema grammar writes a migration's
  *      new foreign key into an already-prepared table scoped too — without it `constrained()` would find
  *      no unique `(id)` to reference.
- *   5. Re-grant the non-owner role, including default privileges for tables the migration just added.
+ *   5. Re-grant the non-owner role, including default privileges for tables the migration just added —
+ *      and, on the central server with `central_access` on, the same DML on `public` a schema tenant's
+ *      owner connection has, defaults following the migrating user (so later central tables are covered).
  *   6. Purge the transient connection.
  *
  * Never inside a tenant frame: a data backfill inside one tenant's frame would be scoped to that
@@ -106,6 +108,11 @@ class PoolMigrator
                 }
 
                 (new RoleGrants($connection, $schema))->grant($role);
+
+                if (Config::get('beam.tenancy.pooled.central_access', true) && app(PoolRegistry::class)->remoteConnectionFor($pool) === null) {
+                    $migrator = (string) $connection->selectOne('select current_user as u')->u;
+                    (new RoleGrants($connection, 'public', defaultsFor: $migrator))->grant($role);
+                }
             }
 
             return $report;

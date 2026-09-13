@@ -127,6 +127,10 @@ abstract class PostgresTestCase extends TestCase
         DB::purge(self::REMOTE_CONNECTION);
 
         DB::statement("do $$ begin if not exists (select 1 from pg_roles where rolname = '".self::RLS_ROLE."') then create role ".self::RLS_ROLE.' login; end if; end $$');
+        // Default privileges on `public` outlive the tables dropped above; reset them so a test proves its own
+        // central grant rather than inheriting an earlier test's (pools:migrate's central_access).
+        DB::statement('alter default privileges in schema public revoke all on tables from '.self::RLS_ROLE);
+        DB::statement('alter default privileges in schema public revoke all on sequences from '.self::RLS_ROLE);
 
         parent::defineDatabaseMigrations();
 
