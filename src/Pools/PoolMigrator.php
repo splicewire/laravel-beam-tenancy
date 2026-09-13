@@ -97,6 +97,10 @@ class PoolMigrator
 
             $role = Config::get('beam.tenancy.pooled.rls_user.username');
             if (is_string($role) && $role !== '') {
+                if ($connection->selectOne('select 1 as ok from pg_roles where rolname = ?', [$role]) === null) {
+                    throw new RuntimeException("The pooled RLS role '{$role}' does not exist on this cluster — run `php artisan splicewire:beam:tenancy:pools:role` once before pooling tenants.");
+                }
+
                 (new RoleGrants($connection, $schema))->grant($role);
             }
 

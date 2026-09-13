@@ -259,16 +259,24 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
             // (`DatabaseManager::createTenantConnection()`), which is the frame `run()` opened.
             $connection = \Illuminate\Support\Facades\DB::connection('tenant');
             $schema = $tenant->poolSchema();
+
+            // Refuse unless this frame really is the tenant's own policy-scoped frame. A tenant marked
+            // pooled whose connection was built WITHOUT its session settings keeps the owner's
+            // credentials, and with FORCE off the owner is not subject to the policy — so an unguarded
+            // DELETE here would empty every tenant's rows in the pool (review finding, pooled upgrade path).
+            self::assertScopedFrame($connection, $tenant);
+
             $tables = array_map(
                 fn ($row) => $row->table_name,
                 $connection->select(
-                    "select table_name from information_schema.tables where table_schema = ? and table_type = 'BASE TABLE' and table_name <> 'migrations'",
+                    "select table_name from information_schema.tables where table_schema = ? and table_type = 'BASE TABLE' and table_name <> 'migrations' order by table_name",
                     [$schema]
                 )
             );
 
-            // One transaction: a cyclic or RESTRICT foreign key that survives every pass must leave the
-            // tenant whole, not half-removed.
+            // One transaction, so a foreign-key order that never resolves leaves the tenant whole. Each
+            // DELETE runs in its own SAVEPOINT (a nested Laravel transaction): Postgres aborts the whole
+            // transaction on the first error otherwise, and the retry below would only ever see 25P02.
             $connection->transaction(function () use ($connection, $schema, $tables, $tenant) {
                 $remaining = $tables;
                 $passes = 0;
@@ -276,7 +284,7 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
                     $refused = [];
                     foreach ($remaining as $table) {
                         try {
-                            $connection->table($schema.'.'.$table)->delete();
+                            $connection->transaction(fn () => $connection->table($schema.'.'.$table)->delete());
                         } catch (\Illuminate\Database\QueryException $e) {
                             if (($e->errorInfo[0] ?? null) !== '23503') { // foreign_key_violation
                                 throw $e;
@@ -295,6 +303,24 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
         });
 
         return true;
+    }
+
+    /**
+     * A pooled delete may only run on a connection that authenticates as the configured non-owner
+     * role AND carries this tenant's own key in the session setting. Public so the promotion job's
+     * pool cleanup applies the same check.
+     */
+    public static function assertScopedFrame(\Illuminate\Database\Connection $connection, Tenant $tenant): void
+    {
+        $setting = (string) config('beam.tenancy.pooled.session_setting', 'app.tenant_id');
+        $role = (string) config('beam.tenancy.pooled.rls_user.username', '');
+        $row = $connection->selectOne('select current_user as u, current_setting(?, true) as k', [$setting]);
+
+        if ($role === '' || $row->u !== $role || $row->k !== (string) $tenant->getTenantKey()) {
+            throw new \RuntimeException(
+                "Refusing a pooled delete for tenant '{$tenant->getTenantKey()}': the connection is '{$row->u}' with {$setting} = '".($row->k ?? 'unset')."', not the non-owner role '{$role}' bound to this tenant."
+            );
+        }
     }
 
     protected function pooled(TenantWithDatabase $tenant): bool

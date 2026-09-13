@@ -134,3 +134,40 @@ it('ends tenancy when a pooled request terminates — a second request with no t
         DB::purge('term_unbound_probe');
     }
 });
+
+it('names the missing command when the configured RLS role does not exist', function () {
+    config(['beam.tenancy.pooled.rls_user' => ['username' => 'beam_tenancy_absent_role', 'password' => '']]);
+
+    expect(fn () => app(PoolMigrator::class)->migrate('default'))
+        ->toThrow(RuntimeException::class, 'pools:role');
+});
+
+it('deletes a leaving tenant\'s rows across a foreign key even when the parent table is met first', function () {
+    $alpha = provisionPooled('alpha');
+    $bravo = provisionPooled('bravo');
+
+    foreach ([$alpha, $bravo] as $tenant) {
+        tenancy()->initialize($tenant);
+        $folder = (string) DB::connection('tenant')->table('pooled_a_folders')->insertGetId(['name' => 'f'], 'id');
+        DB::connection('tenant')->table('pooled_b_items')->insert(['folder_id' => $folder]);
+        tenancy()->end();
+    }
+
+    $alpha->database()->manager()->deleteDatabase($alpha);
+
+    expect(collect(DB::select('select tenant_id from pool_default.pooled_a_folders'))->pluck('tenant_id')->all())->toBe(['bravo'])
+        ->and(collect(DB::select('select tenant_id from pool_default.pooled_b_items'))->pluck('tenant_id')->all())->toBe(['bravo']);
+});
+
+it('refuses a pooled delete on a frame that is not the tenant\'s own non-owner, key-bound connection', function () {
+    $alpha = provisionPooled('alpha');
+
+    // A tenant marked pooled whose session-settings internal was lost: its connection keeps the
+    // owner's credentials, which RLS does not scope with FORCE off.
+    $alpha->setInternal('db_session_settings', null);
+    $alpha->save();
+    $stale = Tenant::find('alpha');
+
+    expect(fn () => $stale->database()->manager()->deleteDatabase($stale))
+        ->toThrow(RuntimeException::class, 'Refusing a pooled delete');
+});

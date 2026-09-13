@@ -23,7 +23,7 @@ it('leaves a tenant on schema storage by default — the historical behaviour is
 });
 
 it('pools a tenant into the default pool when the host default says so', function () {
-    config(['beam.tenancy.pooled.default_for_new_tenants' => true, 'beam.tenancy.pooled.default_pool' => 'default']);
+    config(['beam.tenancy.pooled.default_for_new_tenants' => true, 'beam.tenancy.pooled.default_pool' => 'default', 'beam.tenancy.pooled.rls_user.username' => 'beam_rls']);
 
     $tenant = decideStorageFor(['id' => 'b']);
 
@@ -84,4 +84,25 @@ it('rejects a resolver that does not implement the contract', function () {
     config(['beam.tenancy.pooled.storage_resolver' => 'storage-resolver-wrong']);
 
     expect(fn () => decideStorageFor(['id' => 'z']))->toThrow(InvalidArgumentException::class, 'does not implement');
+});
+
+it('never re-decides a tenant that already has storage — retry on an existing schema tenant stays schema', function () {
+    config(['beam.tenancy.pooled.default_for_new_tenants' => true, 'beam.tenancy.pooled.rls_user.username' => 'beam_rls']);
+    $existing = Tenant::create(['id' => 'old', 'name' => 'Old', 'slug' => 'old']);
+    $existing->setInternal('db_name', 'tenant_old');
+    $existing->save();
+
+    (new DecideStorage($existing))->handle();
+
+    expect(Tenant::find('old')->storage())->toBe(TenantStorage::Schema)
+        ->and(Tenant::find('old')->pool)->toBeNull();
+});
+
+it('falls back to schema when the default is pooled but no RLS role is configured, and warns', function () {
+    config(['beam.tenancy.pooled.default_for_new_tenants' => true, 'beam.tenancy.pooled.rls_user.username' => null]);
+    Illuminate\Support\Facades\Log::spy();
+
+    expect(decideStorageFor(['id' => 'unconfigured'])->storage())->toBe(TenantStorage::Schema);
+
+    Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->once()->withArgs(fn ($message) => str_contains($message, 'no RLS role is configured'));
 });

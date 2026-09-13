@@ -7,6 +7,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Splicewire\Beam\Tenancy\Contracts\ResolvesTenantStorage;
 use Splicewire\Beam\Tenancy\Tenant;
@@ -41,6 +42,16 @@ class DecideStorage implements ShouldQueue
     public function handle(): void
     {
         if ($this->tenant->isIsolatedDatabase() || $this->tenant->isPooled()) {
+            return;
+        }
+
+        // A tenant that already has storage is never re-decided. Schema is the ABSENCE of markers,
+        // so the marker checks above cannot see an existing schema tenant — but stancl's
+        // CreateDatabase writes `db_name` on every tenant it provisions, so its presence means
+        // "storage already exists". Without this, `TenantProvisioning::retry()` on an existing
+        // schema tenant, under a pooled default, would mark it pooled while its data stays in
+        // `tenant_<id>`. (Measured on the local dev database 2026-09-12: 18 of 18 tenants carry it.)
+        if ($this->tenant->getInternal('db_name') !== null) {
             return;
         }
 
@@ -87,8 +98,24 @@ class DecideStorage implements ShouldQueue
         return $resolver->resolve($this->tenant);
     }
 
+    /**
+     * The host default. A pooled default on a host with no non-owner RLS role configured falls back
+     * to Schema with a warning, rather than failing every new tenant: the default is a preference,
+     * and a host that has not provisioned the role (`pools:role` + `BEAM_TENANCY_RLS_*`) cannot honour
+     * it. An EXPLICIT pooled request or resolver answer still fails loud on such a host.
+     */
     protected function default(): TenantStorage
     {
-        return config('beam.tenancy.pooled.default_for_new_tenants', false) ? TenantStorage::Pooled : TenantStorage::Schema;
+        if (! config('beam.tenancy.pooled.default_for_new_tenants', false)) {
+            return TenantStorage::Schema;
+        }
+
+        if (empty(config('beam.tenancy.pooled.rls_user.username'))) {
+            Log::warning("beam-tenancy: pooled is the default for new tenants but no RLS role is configured (BEAM_TENANCY_RLS_USERNAME); tenant '{$this->tenant->getTenantKey()}' gets Schema storage.");
+
+            return TenantStorage::Schema;
+        }
+
+        return TenantStorage::Pooled;
     }
 }
