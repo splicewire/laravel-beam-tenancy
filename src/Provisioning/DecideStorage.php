@@ -110,7 +110,7 @@ class DecideStorage implements ShouldQueue
             return TenantStorage::Schema;
         }
 
-        if (empty(config('beam.tenancy.pooled.rls_user.username'))) {
+        if (empty(app(\Splicewire\Beam\Tenancy\Pools\PoolRegistry::class)->rlsUserFor((string) config('beam.tenancy.pooled.default_pool', 'default'))['username'])) {
             Log::warning("beam-tenancy: pooled is the default for new tenants but no RLS role is configured (BEAM_TENANCY_RLS_USERNAME); tenant '{$this->tenant->getTenantKey()}' gets Schema storage.");
 
             return TenantStorage::Schema;

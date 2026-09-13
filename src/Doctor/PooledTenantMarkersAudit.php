@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy\Doctor;
 
 use Rushing\Doctor\DoctorAudit;
 use Rushing\Doctor\Finding;
+use Splicewire\Beam\Tenancy\Pools\PoolRegistry;
 use Splicewire\Beam\Tenancy\Tenant;
 use Throwable;
 
@@ -52,6 +53,19 @@ class PooledTenantMarkersAudit implements DoctorAudit
 
             if ($carried !== $key) {
                 $defects[] = "{$key}: session setting {$setting} is ".($carried === null ? 'missing' : "'{$carried}'").", not the tenant's own key";
+            }
+
+            try {
+                $expected = app(PoolRegistry::class)->remoteConnectionFor((string) $tenant->pool);
+            } catch (Throwable $e) {
+                $defects[] = "{$key}: {$e->getMessage()}";
+                $expected = $tenant->tenancy_db_connection;
+            }
+
+            // A tenant pointing at another server than its pool's would read (or write) a different
+            // database's copy of the pool — or none (ticket 13).
+            if (($tenant->tenancy_db_connection ?: null) !== $expected) {
+                $defects[] = "{$key}: db_connection is '".($tenant->tenancy_db_connection ?: 'central')."', not pool '{$tenant->pool}'s server '".($expected ?? 'central')."'";
             }
 
             if ($tenant->tenancy_db_name !== $tenant->poolSchema()) {

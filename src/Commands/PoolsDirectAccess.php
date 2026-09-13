@@ -62,7 +62,7 @@ class PoolsDirectAccess extends Command
         $setting = (string) config('beam.tenancy.pooled.session_setting', 'app.tenant_id');
         $connectionName = 'direct_access_bind_'.$tenant->getTenantKey();
 
-        $this->registerOwnerConnection($connectionName, (string) $tenant->poolSchema());
+        $this->registerOwnerConnection($connectionName, $tenant);
 
         try {
             (new RoleBinder(DB::connection($connectionName), (string) $tenant->poolSchema()))
@@ -90,7 +90,7 @@ class PoolsDirectAccess extends Command
         $role = (string) $tenant->direct_access_role;
         $connectionName = 'direct_access_unbind_'.$tenant->getTenantKey();
 
-        $this->registerOwnerConnection($connectionName, (string) $tenant->poolSchema());
+        $this->registerOwnerConnection($connectionName, $tenant);
 
         try {
             (new RoleBinder(DB::connection($connectionName), (string) $tenant->poolSchema()))->unbind($role);
@@ -116,11 +116,12 @@ class PoolsDirectAccess extends Command
         return 'direct_'.$slug;
     }
 
-    /** An owner-privileged connection with search_path pointed at the pool schema. */
-    protected function registerOwnerConnection(string $connectionName, string $schema): void
+    /** An owner-privileged connection on the pool's server, search_path pointed at the pool schema. */
+    protected function registerOwnerConnection(string $connectionName, Tenant $tenant): void
     {
-        $central = TenancyConnections::central() ?? (string) config('database.default');
-        $template = (array) Config::get("database.connections.{$central}");
+        $schema = (string) $tenant->poolSchema();
+        $server = app(\Splicewire\Beam\Tenancy\Pools\PoolRegistry::class)->connectionFor((string) $tenant->pool);
+        $template = (array) Config::get("database.connections.{$server}");
         $template['search_path'] = "{$schema},public";
         unset($template['session_settings']);
         Config::set("database.connections.{$connectionName}", $template);

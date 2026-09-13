@@ -95,10 +95,10 @@ class PoolMigrator
 
             $report = $preparer->prepare();
 
-            $role = Config::get('beam.tenancy.pooled.rls_user.username');
+            $role = app(PoolRegistry::class)->rlsUserFor($pool)['username'];
             if (is_string($role) && $role !== '') {
                 if ($connection->selectOne('select 1 as ok from pg_roles where rolname = ?', [$role]) === null) {
-                    throw new RuntimeException("The pooled RLS role '{$role}' does not exist on this cluster — run `php artisan splicewire:beam:tenancy:pools:role` once before pooling tenants.");
+                    throw new RuntimeException("The pooled RLS role '{$role}' does not exist on pool '{$pool}'s server — run `php artisan splicewire:beam:tenancy:pools:role` once before pooling tenants.");
                 }
 
                 (new RoleGrants($connection, $schema))->grant($role);
@@ -176,11 +176,12 @@ class PoolMigrator
      */
     protected function registerOwnerConnection(string $schema, string $pool): string
     {
-        $template = TenancyConnections::central() ?? Config::get('database.default');
+        // The pool's own server (ticket 13) — the central connection unless the pool names another.
+        $template = app(PoolRegistry::class)->connectionFor($pool);
         $config = Config::get("database.connections.{$template}");
 
         if (! is_array($config) || ($config['driver'] ?? null) !== 'pgsql') {
-            throw new RuntimeException("Pooled storage needs a pgsql central connection; '{$template}' is not one.");
+            throw new RuntimeException("Pool '{$pool}' needs a pgsql owner connection; '{$template}' is not one.");
         }
 
         $config['search_path'] = "{$schema},public";

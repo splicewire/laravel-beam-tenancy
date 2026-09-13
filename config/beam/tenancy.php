@@ -295,6 +295,14 @@ return [
         // The namespaced Postgres setting the policy keys on. Must carry a dot.
         'session_setting' => env('BEAM_TENANCY_RLS_SETTING', 'app.tenant_id'),
 
+        // Pools on other database servers (pooled-storage ticket 13). A pool not listed here lives on the
+        // central connection. `connection` names a pgsql connection in `database.connections` — the OWNER
+        // for that server (runs pool migrations and grants); `rls_user` optionally overrides the non-owner
+        // role above for that pool. Tenants store only the connection name (`tenancy_db_connection`),
+        // never credentials. Move a tenant between pools with `pools:move`.
+        //   'eu1' => ['connection' => 'pool_eu1', 'rls_user' => ['username' => env('POOL_EU1_RLS_USERNAME'), 'password' => env('POOL_EU1_RLS_PASSWORD')]],
+        'pools' => [],
+
         // Opt-in (pooled-storage ticket 10): whether `pools:direct-access` may issue or revoke a
         // per-tenant login role at all — a role whose OWN `ALTER ROLE ... SET` binds the session
         // setting, so a direct connection (a BI tool, psql) as it sees exactly that tenant's rows

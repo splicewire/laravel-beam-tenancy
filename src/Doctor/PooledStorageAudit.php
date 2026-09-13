@@ -12,6 +12,7 @@ use Rushing\PostgresRls\Audits\CoverageAudit;
 use Rushing\PostgresRls\Audits\FrameAudit;
 use Rushing\PostgresRls\Audits\OwnerExposureAudit;
 use Rushing\PostgresRls\Audits\RoleAudit;
+use Splicewire\Beam\Tenancy\Pools\PoolRegistry;
 use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 use Splicewire\Beam\Tenancy\Tenant;
 use Throwable;
@@ -69,18 +70,25 @@ class PooledStorageAudit implements DoctorAudit
                 $this->registerProbe($name, $tenants->first());
             }
 
-            $scope = $this->scopeFor($byPool->keys()->map(fn ($p) => (string) $p)->all(), array_values($probes));
             $connections = new ConnectionConfig((array) Config::get('database.connections', []));
+            $registry = app(PoolRegistry::class);
+            $findings = [];
 
-            if (! $this->gates) {
-                return (new FrameAudit($this->db, $scope, $connections))->run();
+            // One audit scope per SERVER (ticket 13): the rushing audits read one catalogue connection.
+            foreach ($byPool->keys()->map(fn ($p) => (string) $p)->groupBy(fn (string $pool) => $registry->connectionFor($pool)) as $server => $pools) {
+                $pools = $pools->all();
+                $scope = $this->scopeFor($pools, array_values(array_intersect_key($probes, array_flip($pools))), (string) $server);
+
+                $findings = [...$findings, ...($this->gates
+                    ? [
+                        ...(new CoverageAudit($this->db, $scope))->run(),
+                        ...(new RoleAudit($this->db, $scope, $connections))->run(),
+                        ...(new OwnerExposureAudit($this->db, $scope, $connections))->run(),
+                    ]
+                    : (new FrameAudit($this->db, $scope, $connections))->run())];
             }
 
-            return [
-                ...(new CoverageAudit($this->db, $scope))->run(),
-                ...(new RoleAudit($this->db, $scope, $connections))->run(),
-                ...(new OwnerExposureAudit($this->db, $scope, $connections))->run(),
-            ];
+            return $findings;
         } catch (Throwable $e) {
             return [Finding::fail('tenancy.pooled-storage', 'Could not build a probe connection for a pool: '.$e->getMessage())];
         } finally {
@@ -91,19 +99,19 @@ class PooledStorageAudit implements DoctorAudit
     }
 
     /**
-     * The scope the rushing audits measure: every pool schema, the central catalogue connection, the
+     * The scope the rushing audits measure: the pool schemas on one server, that server's catalogue connection, the
      * probe connections as the scoped set, and this package's own column/setting/force choices.
      *
      * @param  list<string>  $pools
      * @param  list<string>  $probeConnections
      */
-    public function scopeFor(array $pools, array $probeConnections): AuditScope
+    public function scopeFor(array $pools, array $probeConnections, ?string $server = null): AuditScope
     {
         $rls = (array) Config::get('postgres-rls', []);
 
         return new AuditScope(
             schemas: array_map(fn (string $pool) => Tenant::poolSchemaFor($pool), $pools),
-            connection: TenancyConnections::central(),
+            connection: $server ?? TenancyConnections::central(),
             scopedConnections: $probeConnections,
             maintenanceConnections: [],
             column: (string) ($rls['column'] ?? 'tenant_id'),

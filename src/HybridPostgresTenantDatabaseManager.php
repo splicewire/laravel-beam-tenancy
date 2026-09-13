@@ -8,6 +8,7 @@ use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseTrustStore;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Pools\PoolMigrator;
+use Splicewire\Beam\Tenancy\Pools\PoolRegistry;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 
@@ -179,10 +180,12 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
         // a pooled tenant connecting as the owner would read every tenant's rows, so a missing role
         // is a hard stop rather than a fallback.
         if (isset($baseConfig['session_settings'])) {
-            $user = config('beam.tenancy.pooled.rls_user', []);
+            // $baseConfig is already the pool's server (stancl read the tenant's `db_connection`
+            // template); the role is the pool's own, else the global one (ticket 13).
+            $user = app(PoolRegistry::class)->rlsUserFor(PoolRegistry::poolFromSchema($databaseName) ?? '');
             if (empty($user['username'])) {
                 throw new \RuntimeException(
-                    "Pooled storage needs a non-owner Postgres role: set beam.tenancy.pooled.rls_user (BEAM_TENANCY_RLS_USERNAME/PASSWORD) before connecting a pooled tenant to '{$databaseName}'."
+                    "Pooled storage needs a non-owner Postgres role: set beam.tenancy.pooled.rls_user (BEAM_TENANCY_RLS_USERNAME/PASSWORD), or the pool's own rls_user, before connecting a pooled tenant to '{$databaseName}'."
                 );
             }
             $baseConfig['username'] = $user['username'];
@@ -230,6 +233,9 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
         $this->poolMigrator->ensure((string) $tenant->pool);
 
         $tenant->setInternal('db_name', $tenant->poolSchema());
+        // The pool's server (ticket 13): stancl builds the tenant connection from this template.
+        // Null for a pool on the central connection, which is what stancl falls back to.
+        $tenant->setInternal('db_connection', app(PoolRegistry::class)->remoteConnectionFor((string) $tenant->pool));
         $tenant->setInternal('db_session_settings', [
             (string) config('beam.tenancy.pooled.session_setting', 'app.tenant_id') => (string) $tenant->getTenantKey(),
         ]);
@@ -266,13 +272,9 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
             // DELETE here would empty every tenant's rows in the pool (review finding, pooled upgrade path).
             self::assertScopedFrame($connection, $tenant);
 
-            $tables = array_map(
-                fn ($row) => $row->table_name,
-                $connection->select(
-                    "select table_name from information_schema.tables where table_schema = ? and table_type = 'BASE TABLE' and table_name <> 'migrations' order by table_name",
-                    [$schema]
-                )
-            );
+            // Only tables the policy scopes. An unscoped (excluded) table's DELETE through this frame
+            // would remove every tenant's rows in it.
+            $tables = PoolRegistry::policyTables($connection, (string) $schema);
 
             // One transaction, so a foreign-key order that never resolves leaves the tenant whole. Each
             // DELETE runs in its own SAVEPOINT (a nested Laravel transaction): Postgres aborts the whole
@@ -313,7 +315,7 @@ class HybridPostgresTenantDatabaseManager implements TenantDatabaseManager
     public static function assertScopedFrame(\Illuminate\Database\Connection $connection, Tenant $tenant): void
     {
         $setting = (string) config('beam.tenancy.pooled.session_setting', 'app.tenant_id');
-        $role = (string) config('beam.tenancy.pooled.rls_user.username', '');
+        $role = (string) (app(PoolRegistry::class)->rlsUserFor((string) $tenant->pool)['username'] ?? '');
         $row = $connection->selectOne('select current_user as u, current_setting(?, true) as k', [$setting]);
 
         if ($role === '' || $row->u !== $role || $row->k !== (string) $tenant->getTenantKey()) {

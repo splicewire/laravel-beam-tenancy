@@ -232,6 +232,21 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
    tenant's rows with no application in the path. The password prints once and is stored nowhere; the
    tenant keeps only the role name. Re-running rotates the password; `--revoke` drops the role.
 
+7. **Pools on other database servers (optional).** A pool lives on the central connection unless
+   `beam.tenancy.pooled.pools` names another pgsql connection for it (the owner for that server), with
+   an optional per-pool `rls_user`. New pooled tenants join `default_pool`; the tenant stores only the
+   connection name (`tenancy_db_connection`), never credentials. `pools:role` provisions roles on every
+   server a pool uses, and the doctor audits each server separately. A pool on another server has no
+   central `public` schema behind it, so unpinned reads of central tables from such a tenant find nothing.
+8. **Move a tenant between pools:** `php artisan splicewire:beam:tenancy:pools:move <tenant> <pool>`,
+   on the same server or another. Rows are copied on the target as the target's non-owner role, row
+   counts are verified, the tenant's markers flip in one write, and only then are its old rows deleted.
+   A failure before the flip leaves the tenant where it was. Only RLS-scoped tables move; excluded,
+   pool-level tables stay. If rows were written to the old pool during the move, the old rows are kept and
+   the move reports it. Move a quiet tenant: the write block is only what the host enforces for
+   `write_blocked_at`. Ids another tenant already holds in the target
+   pool collide until pool keys are tenant-scoped (map ticket 11).
+
 `BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
 `BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.
 
