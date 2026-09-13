@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -94,18 +95,22 @@ it('is idempotent — a second run duplicates no seat, no user and no tenant', f
     $before = [
         'tenants' => DB::table('tenants')->count(),
         'users' => DB::table('users')->count(),
-        'seats' => DB::table('tenant_users')->get()->map(fn ($r) => (array) $r)->toArray(),
+        'seats' => DB::table('tenant_users')->get()->map(fn ($r) => Arr::except((array) $r, 'updated_at'))->toArray(),
     ];
 
+    // Ten seconds later, so a re-stamped `accepted_at` always differs. It used to share the first run's
+    // second most of the time — and `updated_at`, which the second run's seat sync legitimately touches,
+    // failed the comparison whenever the runs straddled a second boundary.
+    $this->travel(10)->seconds();
     seedDemoTenant();
 
     $after = [
         'tenants' => DB::table('tenants')->count(),
         'users' => DB::table('users')->count(),
-        'seats' => DB::table('tenant_users')->get()->map(fn ($r) => (array) $r)->toArray(),
+        'seats' => DB::table('tenant_users')->get()->map(fn ($r) => Arr::except((array) $r, 'updated_at'))->toArray(),
     ];
 
-    // Row-for-row identical, INCLUDING `accepted_at` — the second run must not re-stamp it.
+    // Row-for-row identical but for `updated_at`, INCLUDING `accepted_at` — the second run must not re-stamp it.
     expect($after)->toBe($before)
         ->and($before['tenants'])->toBe(1)
         ->and($before['users'])->toBe(3)
