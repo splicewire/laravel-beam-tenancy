@@ -156,3 +156,21 @@ it('refuses a move into the same pool, and a tenant that is not pooled', functio
     $this->artisan('splicewire:beam:tenancy:pools:move', ['tenant' => 'plain', 'pool' => 'remote'])
         ->expectsOutputToContain('not on Pooled storage')->assertFailed();
 });
+
+it('moves a tenant into a pool where another tenant already holds the same id', function () {
+    $shared = '01a09827-0000-4000-8000-0000000abcde';
+
+    foreach ([provisionPooledInto('alpha', 'default'), provisionPooledInto('charlie', 'remote')] as $tenant) {
+        tenancy()->initialize($tenant);
+        DB::connection('tenant')->table('pooled_a_folders')->insert(['id' => $shared, 'name' => $tenant->getTenantKey()]);
+        DB::connection('tenant')->table('pooled_b_items')->insert(['folder_id' => $shared]);
+        tenancy()->end();
+    }
+
+    Artisan::registerCommand(app(PoolsMove::class));
+    $this->artisan('splicewire:beam:tenancy:pools:move', ['tenant' => 'alpha', 'pool' => 'remote'])->assertSuccessful();
+
+    expect(collect(DB::connection(PostgresTestCase::REMOTE_CONNECTION)->select('select tenant_id, name from pool_remote.pooled_a_folders where id = ? order by tenant_id', [$shared]))->map(fn ($r) => $r->tenant_id.':'.$r->name)->all())
+        ->toBe(['alpha:alpha', 'charlie:charlie'])
+        ->and(DB::connection(PostgresTestCase::REMOTE_CONNECTION)->table('pool_remote.pooled_b_items')->count())->toBe(2);
+});

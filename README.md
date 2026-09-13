@@ -250,6 +250,12 @@ reconnect. Decision record: `docs/adr/0001-pooled-storage-is-row-level-security-
 `BEAM_TENANCY_FORCE_RLS=true` makes the owner subject to the policy too; the owner then needs
 `BYPASSRLS` to migrate, which managed Postgres (Cloud SQL) cannot grant — leave it off there.
 
-Accepted hazards of the base tier: foreign-key checks bypass RLS; sequences are pool-global; backups are
+Keys in a pool are per tenant: the preparer rewrites primary keys and unique indexes to lead with
+`tenant_id` and foreign keys between pool tables to carry it on both sides, so a central row copied into
+every tenant keeps its id in each and a reference to another tenant's row is refused. Upserts keep naming
+their own columns; the scoped connection's grammar adds `tenant_id` to the conflict target.
+
+Accepted hazards of the base tier: a foreign key the preparer cannot rewrite (from an excluded table,
+`MATCH FULL`, `ON UPDATE SET NULL`) still bypasses RLS and is reported; sequences are pool-global; backups are
 pool-granular. The Postgres-gated suite (`tests/Postgres/`, `PG_TEST_DATABASE=…`) proves the mechanism;
 the sqlite suite proves the wiring with fakes.

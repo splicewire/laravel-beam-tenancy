@@ -66,8 +66,13 @@ and isolated tenants; and its plain `SET` does not survive a reconnect.
 - The runbook sentence needs one clause: the prohibition stays on an application discriminator; a
   storage-enforced pooled schema is a substrate state the model still does not see (map ticket 07
   amends it, and app ADR-0221 records the flagship's default).
-- Accepted hazards of the base tier, documented in the rushing package's convention doc: foreign-key
-  checks bypass RLS (a guessed id can be referenced); sequences are pool-global (ids reveal
+- Keys are per tenant (amended 2026-09-12, map ticket 11): the preparer rewrites primary keys to
+  `(tenant_id, …)` and foreign keys between pool tables to `(tenant_id, …) REFERENCES (tenant_id, …)`,
+  because provisioning copies central ids (the sync user, the owner) into every tenant and a pool is one
+  table. That also closed the first hazard below for every foreign key it rewrites.
+- Accepted hazards of the base tier, documented in the rushing package's convention doc: a foreign key
+  the preparer cannot rewrite still bypasses RLS (a guessed id can be referenced; reported by the
+  preparer and `CoverageAudit`); sequences are pool-global (ids reveal
   existence by gap — 81 serial columns in the shared set, ticket 01 census); backups are
   pool-granular.
 - On a dev box every connection is a superuser (`postgres`, `root`), and superusers bypass RLS

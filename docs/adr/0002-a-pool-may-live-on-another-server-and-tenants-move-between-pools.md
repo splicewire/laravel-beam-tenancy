@@ -33,7 +33,7 @@ this package only — no host adopts it yet.
 
 - A tenant in a remote pool has no central `public` schema behind its connection (the Isolated Database
   hazard, `Support\TenancyConnections`).
-- Primary keys that are not tenant-scoped make a move fail when the target pool already holds the same id
-  for another tenant (map ticket 11); the failure is before the flip.
+- Primary keys are tenant-scoped (map ticket 11), so the target pool holding the same id for another
+  tenant does not block a move.
 - Choosing a pool for a NEW tenant is still `default_pool`; placement across servers is the host's job
   (move after provisioning, or set the default).

@@ -171,3 +171,55 @@ it('refuses a pooled delete on a frame that is not the tenant\'s own non-owner, 
     expect(fn () => $stale->database()->manager()->deleteDatabase($stale))
         ->toThrow(RuntimeException::class, 'Refusing a pooled delete');
 });
+
+it('lets two tenants in one pool hold a row with the same id, refuses a reference to the other tenant\'s row, and upserts on a widened index', function () {
+    $a = provisionPooled('alpha');
+    $b = provisionPooled('bravo');
+    $shared = '01a09827-0000-4000-8000-00000000c0de';
+
+    // A central row copied into every tenant (the sync user, the owner) keeps its id in each.
+    foreach ([$a, $b] as $tenant) {
+        tenancy()->initialize($tenant);
+        DB::table('pooled_a_folders')->insert(['id' => $shared, 'name' => $tenant->getTenantKey()]);
+        tenancy()->end();
+    }
+
+    expect(DB::table('pool_default.pooled_a_folders')->where('id', $shared)->count())->toBe(2);
+
+    // Bravo drops its copy; a reference to the id now finds only alpha's row, which the key refuses.
+    tenancy()->initialize($b);
+    DB::table('pooled_a_folders')->where('id', $shared)->delete();
+    expect(fn () => DB::table('pooled_b_items')->insert(['folder_id' => $shared]))
+        ->toThrow(Illuminate\Database\QueryException::class, 'pooled_b_items_folder_id_foreign');
+
+    // `unique('slug')` became (tenant_id, slug); the model-shaped upsert still names only slug.
+    DB::table('pooled_notes')->upsert([['slug' => 'hello', 'title' => 'first']], ['slug'], ['title']);
+    DB::table('pooled_notes')->upsert([['slug' => 'hello', 'title' => 'second']], ['slug'], ['title']);
+    expect(DB::table('pooled_notes')->pluck('title')->all())->toBe(['second']);
+    tenancy()->end();
+
+    tenancy()->initialize($a);
+    expect(DB::table('pooled_b_items')->insert(['folder_id' => $shared]))->toBeTrue();
+    tenancy()->end();
+});
+
+it('migrates a later foreign key into an already-prepared pool table, scoped', function () {
+    $alpha = provisionPooled('alpha');
+
+    config(['tenancy.migration_parameters.--path' => [
+        realpath(__DIR__.'/../Fixtures/pool-migrations'),
+        realpath(__DIR__.'/../Fixtures/pool-migrations-later'),
+    ]]);
+
+    app(PoolMigrator::class)->migrate('default');
+
+    expect(DB::selectOne("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'pooled_c_labels_folder_id_foreign'")->def)
+        ->toBe('FOREIGN KEY (tenant_id, folder_id) REFERENCES pool_default.pooled_a_folders(tenant_id, id) ON DELETE SET NULL (folder_id)')
+        ->and(app(PoolMigrator::class)->migrate('default')->isNoop())->toBeTrue();
+
+    tenancy()->initialize($alpha);
+    $folder = (string) DB::table('pooled_a_folders')->insertGetId(['name' => 'f'], 'id');
+    DB::table('pooled_c_labels')->insert(['folder_id' => $folder]);
+    expect(DB::table('pooled_c_labels')->value('tenant_id'))->toBe('alpha');
+    tenancy()->end();
+});

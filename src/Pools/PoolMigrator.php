@@ -30,7 +30,11 @@ use Splicewire\Beam\Tenancy\Support\TenancyConnections;
  *      host's tenant path) — with `--database` pointed at the transient connection, so the pool
  *      keeps its own `migrations` ledger inside its schema.
  *   4. Re-prepare: discriminator column, index, ENABLE (and FORCE when configured), the hashed policy
- *      (outdated ones recreated, zombies dropped), unique indexes rewritten. `rushing/laravel-postgres-rls`.
+ *      (outdated ones recreated, zombies dropped), primary keys and unique indexes rewritten to lead with
+ *      the column, foreign keys between pool tables carrying it on both sides. `rushing/laravel-postgres-rls`.
+ *      Step 3's connection binds a setting, so the package's scoped schema grammar writes a migration's
+ *      new foreign key into an already-prepared table scoped too — without it `constrained()` would find
+ *      no unique `(id)` to reference.
  *   5. Re-grant the non-owner role, including default privileges for tables the migration just added.
  *   6. Purge the transient connection.
  *
