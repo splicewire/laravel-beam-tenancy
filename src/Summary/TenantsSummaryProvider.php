@@ -27,8 +27,9 @@ use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
  *
  * ## The scope-leak rule
  *
- * Every figure is counted off {@see ScopedIndexQuery::forDefinition()} — the SAME owner-scoped,
- * `filter[...]`-aware, `scope()`-gated builder the Frame index reads — never the bare `Tenant::query()`.
+ * Every figure is counted off {@see ScopedIndexQuery::forAggregate()} — the SAME owner-scoped,
+ * `filter[...]`-aware, `scope()`-gated builder the Frame index reads, in the shape an aggregate reads it
+ * (includes dropped, ordering cleared) — never the bare `Tenant::query()`.
  * Today the neutral `tenants` declaration carries no `scope` closure, so on a central realm this equals
  * the whole roster, which is what an operator's tile should say; the day a host declares one, the tile
  * narrows with the list rather than silently keeping the global total.
@@ -39,7 +40,8 @@ use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
  * not real columns — so a SQL `GROUP BY` cannot see them. One scoped load and a `countBy` is the same
  * shape tower's operator dashboard has always used, and for the same reason: an operator's roster is
  * tens to hundreds of rows. The declared includes (`domains`, `statusEvents`) are dropped for this read
- * because they exist to make the row PROJECTION free, and a count projects nothing.
+ * because they exist to make the row PROJECTION free, and a count projects nothing — that dropping is
+ * {@see ScopedIndexQuery::forAggregate()}'s job, not restated here.
  *
  * `provisioning` is Pending ⊕ Provisioning — the two in-flight states an operator reads as "still
  * arriving"; `suspended` is orthogonal to the provisioning axis (a suspended tenant is usually `active`),
@@ -56,9 +58,9 @@ class TenantsSummaryProvider implements ResourceSummaryProvider
         }
 
         /** @var Builder $rows */
-        $rows = $this->query->forDefinition($resource);
+        $rows = $this->query->forAggregate($resource);
 
-        $tenants = $rows->setEagerLoads([])->get();
+        $tenants = $rows->get();
         $byStatus = $tenants->countBy(fn (Model $tenant): string => (string) $tenant->provisioning_status);
         $count = fn (TenantProvisioningStatus $status): int => (int) ($byStatus[$status->value] ?? 0);
 
@@ -72,20 +74,30 @@ class TenantsSummaryProvider implements ResourceSummaryProvider
             icon: $resource->nav->icon,
             figures: [
                 new SummaryFigureData(key: 'total', label: $label, value: $tenants->count()),
-                new SummaryFigureData(key: 'active', label: 'Active', value: $count(TenantProvisioningStatus::Active), tone: 'active'),
+                new SummaryFigureData(
+                    key: 'active',
+                    label: 'Active',
+                    value: $count(TenantProvisioningStatus::Active),
+                    tone: SummaryFigureData::TONE_ACTIVE,
+                ),
                 new SummaryFigureData(
                     key: 'provisioning',
                     label: 'Provisioning',
                     value: $count(TenantProvisioningStatus::Pending) + $count(TenantProvisioningStatus::Provisioning),
-                    tone: 'busy',
+                    tone: SummaryFigureData::TONE_BUSY,
                 ),
                 new SummaryFigureData(
                     key: 'suspended',
                     label: 'Suspended',
                     value: $tenants->filter(fn (Model $tenant): bool => $tenant->suspended_at !== null)->count(),
-                    tone: 'warn',
+                    tone: SummaryFigureData::TONE_WARN,
                 ),
-                new SummaryFigureData(key: 'failed', label: 'Failed', value: $count(TenantProvisioningStatus::Failed), tone: 'danger'),
+                new SummaryFigureData(
+                    key: 'failed',
+                    label: 'Failed',
+                    value: $count(TenantProvisioningStatus::Failed),
+                    tone: SummaryFigureData::TONE_DANGER,
+                ),
             ],
             overview: null,
         );
