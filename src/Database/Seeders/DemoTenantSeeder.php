@@ -14,6 +14,7 @@ use Splicewire\Beam\Accounts\Database\Seeders\DemoTeamSeeder;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Accounts\Facades\BeamDemo;
+use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Splicewire\Beam\Tenancy\Tenant;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
@@ -246,30 +247,42 @@ class DemoTenantSeeder extends Seeder
             app(Dispatcher::class)->dispatchNow(new CreateDatabase($tenant));
         }
 
-        $this->migrate($tenant);
+        $migrated = $this->migrate($tenant);
 
         // A host's provisioning listeners write to the tenant through their OWN instances (the
         // flagship's `markProvisioning()` does). `data` is a single re-encoded JSON column, so any
         // later save from this seeder would clobber whatever they wrote. Re-read before seating.
         $tenant->refresh();
+
+        // Storage exists and is migrated: the tenant IS provisioned, so say so through the model's own
+        // terminal marker — the same one a host's pipeline and `pools:move` end on. Without it the row
+        // carried `provisioning_status = NULL` (this seeder set only name/slug, and no host pipeline
+        // ran), so the operator dashboard's Tenants card counted the fresh site's one tenant as Active 0
+        // (realm-dashboards ticket 10 review). Only when not already Active, so a second run is a no-op
+        // and a host that marked it first is left alone.
+        if ($migrated && $tenant->provisioning_status !== TenantProvisioningStatus::Active->value) {
+            $tenant->markActive();
+        }
     }
 
     /**
-     * Migrate the demo tenant's schema — SCOPED to its own key.
+     * Migrate the demo tenant's schema — SCOPED to its own key. True when it ran.
      *
      * `tenants:migrate` with no `--tenants` fans out across every tenant in the estate, which is a
      * documented hazard and categorically not a seeder's business. The key is passed explicitly on
      * every call.
      */
-    protected function migrate(Model $tenant): void
+    protected function migrate(Model $tenant): bool
     {
         if (! array_key_exists('tenants:migrate', Artisan::all())) {
             $this->command?->warn('beam-tenancy: demo tenant schema not migrated — tenants:migrate is not registered on this host.');
 
-            return;
+            return false;
         }
 
         Artisan::call('tenants:migrate', ['--tenants' => [(string) $tenant->getKey()]]);
+
+        return true;
     }
 
     /**

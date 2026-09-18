@@ -11,9 +11,12 @@ use Splicewire\Beam\Accounts\Facades\BeamDemo;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Tenant;
+use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\RecordingTenantDatabaseManager;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\RecordingTenantsMigrateCommand;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\User;
+use Splicewire\Beam\Workflows\Display\StatusEmitter;
+use Splicewire\Beam\Workflows\Display\StatusManager;
 
 beforeEach(function () {
     config([
@@ -31,12 +34,38 @@ beforeEach(function () {
  * Turn this harness into a host that HAS tenant databases: register a recording manager for the
  * sqlite driver and a recording `tenants:migrate`. Both are opt-in per test, because the harness's
  * default posture — no manager, no command — is itself a case worth pinning.
+ *
+ * A provisioned demo tenant is stamped Active through `Tenant::markActive()`, which writes the
+ * Display timeline through beam-workflows' `Status` facade to `activity_log`. Neither the facade's
+ * bindings nor the table exist in this harness (it boots no beam-workflows provider), so a host
+ * with tenant databases carries both — bound and shaped exactly as `tests/Postgres/PostgresTestCase`
+ * does for `pools:move`.
  */
 function hostWithTenantDatabases(): void
 {
     config(['tenancy.database.managers.sqlite' => RecordingTenantDatabaseManager::class]);
 
     Artisan::registerCommand(new RecordingTenantsMigrateCommand);
+
+    app()->singleton(StatusEmitter::class, fn ($app) => new StatusEmitter($app['config'], fn () => $app['events']));
+    app()->singleton(StatusManager::class, fn ($app) => new StatusManager($app->make(StatusEmitter::class)));
+
+    if (! Schema::hasTable('activity_log')) {
+        Schema::create('activity_log', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+            $table->string('log_name')->nullable();
+            $table->text('description');
+            $table->string('subject_type')->nullable();
+            $table->string('subject_id')->nullable();
+            $table->string('event')->nullable();
+            $table->string('causer_type')->nullable();
+            $table->string('causer_id')->nullable();
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->uuid('batch_uuid')->nullable();
+            $table->timestamps();
+        });
+    }
 }
 
 function seedDemoTenant(): Tenant
@@ -216,6 +245,38 @@ it('REGRESSION: provisions the tenant storage, so the row is one a sweep can con
 
     // And the storage was actually asked for, once.
     expect(RecordingTenantDatabaseManager::$created)->toBe(['tenant_beam_demo']);
+});
+
+/**
+ * Provisioned means ACTIVE. The first provisioning cut created the storage and stamped nothing:
+ * `tenant()` sets only name/slug and no host pipeline runs, so the row landed with
+ * `provisioning_status = NULL` — and a fresh site's operator dashboard counted its one tenant as
+ * Active 0 (realm-dashboards ticket 10 review). The stamp goes through the model's own terminal
+ * marker, the one a host's pipeline and `pools:move` end on.
+ */
+it('stamps the demo tenant Active once its storage is provisioned, and never a second time', function () {
+    hostWithTenantDatabases();
+
+    $tenant = seedDemoTenant();
+
+    expect($tenant->provisioning_status)->toBe(TenantProvisioningStatus::Active->value);
+
+    // The marker's own evidence: one terminal `complete` event on the timeline...
+    $complete = DB::table('activity_log')->where('subject_id', 'beam_demo')->where('event', 'complete');
+    expect($complete->count())->toBe(1);
+
+    // ...and a second run leaves it at one: an Active tenant is not re-marked.
+    seedDemoTenant();
+
+    expect(Tenant::find('beam_demo')->provisioning_status)->toBe(TenantProvisioningStatus::Active->value)
+        ->and($complete->count())->toBe(1);
+});
+
+it('does not claim Active for a tenant whose storage it could not provision', function () {
+    // The harness's default posture: no manager, so nothing was provisioned and nothing is stamped.
+    $tenant = seedDemoTenant();
+
+    expect($tenant->provisioning_status)->toBeNull();
 });
 
 it('migrates the new schema, SCOPED to its own tenant key and never fanned out', function () {
