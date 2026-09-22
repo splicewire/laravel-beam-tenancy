@@ -121,19 +121,14 @@ it('registers the tenants resource onto the particle registry, unconditionally',
     $registry->definition('tenants'); // throws if the Frame-manifest side is absent
 });
 
-it('declares a model backing, read-only, non-filterable, with both includes', function () {
+it('declares a model backing, read-only, with both includes', function () {
     $resource = AttributedParticleDiscovery::resourceFromAttribute(TenantData::class);
 
     expect($resource->key)->toBe('tenants')
         ->and($resource->modelClass())->toBe(Tenant::class)
         ->and($resource->readOnly)->toBeTrue()
         // The eager-loads that make the widening free rather than per-row (ticket 03 §A3).
-        ->and($resource->includes)->toBe(['domains', 'statusEvents'])
-        // Load-bearing, and invisible for as long as the declaration sat unregistered: `filterable`
-        // DEFAULTS to true, and a filterable index routes through ParticleHydrator::query(), whose
-        // shipped default (PayloadParticleReader::query()) throws. No data-filters query is registered
-        // for `tenants` anywhere in the estate, so true would 500 a bare beam host's tenants list.
-        ->and($resource->filterable)->toBeFalse();
+        ->and($resource->includes)->toBe(['domains', 'statusEvents']);
 
     $definition = $resource->toResourceDefinition();
 

@@ -56,7 +56,6 @@ beforeEach(function () {
         // this twin and `tenants` is the `scope` below, or the comparison would be measuring the shape.
         includes: $neutral->includes,
         project: $neutral->project,
-        filterable: false,
         frame: true,
         readOnly: true,
         label: 'A tenants',

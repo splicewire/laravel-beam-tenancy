@@ -103,7 +103,6 @@ it('counts through the declared scope, never the bare table', function () {
         key: 'a-tenants',
         backing: Tenant::class,
         data: TenantData::class,
-        filterable: false,
         frame: true,
         label: 'A tenants',
         scope: fn (Builder $query) => $query->where('name', 'like', 'A%'),

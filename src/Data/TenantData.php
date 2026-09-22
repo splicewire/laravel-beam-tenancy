@@ -76,12 +76,6 @@ use Splicewire\Beam\Workflows\Data\StatusEventData;
     // `statuses`/`isBusy`/`isStalled` all resolve off the Display timeline — every one of them a query
     // per row until the relation is eager-loaded here (ticket 03 §A3, ticket 05's `ParticleListQuery`).
     includes: ['domains', 'statusEvents'],
-    // No data-filters query is registered for `tenants` anywhere in the estate, and a `filterable: true`
-    // index routes through `ParticleHydrator::query()`, whose shipped default
-    // (`PayloadParticleReader::query()`) THROWS. The declaration's default is true, so this line is what
-    // stops a bare beam host's tenants list from 500-ing the moment the declaration goes live — an
-    // invisible defect for as long as it sat unregistered. Tower's declaration says the same thing.
-    filterable: false,
     label: 'Tenants',
     group: 'Platform',
     icon: 'building',
