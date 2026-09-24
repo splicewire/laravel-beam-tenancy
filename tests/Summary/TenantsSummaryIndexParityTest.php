@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -62,6 +63,14 @@ beforeEach(function () {
         scope: fn (Builder $query) => $query->where('name', 'like', 'A%'),
         summaryProvider: $neutral->summaryProvider,
     ));
+
+    // An operator holding the gate of the realm `tenants` lives in — the one reader a real host serves
+    // it to. Neither declaration carries a policy or tenancy, so laravel-beam's read boundary (473fbfd,
+    // 49a7612) admits the unscoped `tenants` only through that entitlement. The harness has no host
+    // realm map, so it states the operator realm every host declares.
+    config(['beam.core.realm_gates' => ['operator' => ['entitlement' => 'os.operate']]]);
+    app(ParticleResourceRegistry::class)->loadRealmMap(['operator' => ['tenants', 'a-tenants']]);
+    Gate::define('entitlement:os.operate', fn ($user) => $user !== null);
 
     test()->actingAs((new User)->forceFill(['id' => 1]));
 });

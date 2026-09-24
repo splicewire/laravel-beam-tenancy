@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\Gate;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
@@ -29,6 +31,15 @@ beforeEach(function () {
     app()->bind(ParticleHydrator::class, PayloadParticleReader::class);
 
     app(AttributedParticleDiscovery::class)->discover([TenantData::class]);
+
+    // The actor a real host shows this summary to: an operator holding the gate of the realm `tenants`
+    // lives in. The declaration carries no policy, scope or tenancy, so laravel-beam's read boundary
+    // (473fbfd, 49a7612) admits it only through a hard realm entitlement the caller holds. Every host
+    // places `tenants` in its operator realm; the harness has no host, so it says so here.
+    config(['beam.core.realm_gates' => ['operator' => ['entitlement' => 'os.operate']]]);
+    app(ParticleResourceRegistry::class)->loadRealmMap(['operator' => ['tenants', 'a-tenants']]);
+    Gate::define('entitlement:os.operate', fn ($user) => $user !== null);
+    test()->actingAs((new User)->forceFill(['id' => 1]));
 });
 
 /** A tenant row with the provisioning state and suspension the figures group by. */
