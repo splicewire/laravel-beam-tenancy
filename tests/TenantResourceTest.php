@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Rushing\Graphine\Testing\SeamGuard;
+use Schemastud\DataSchemas\Generators\JsonSchemaGenerator;
 use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -15,6 +16,7 @@ use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Data\CreateTenantData;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 use Splicewire\Beam\Tenancy\Tenant;
+use Splicewire\Beam\Tenancy\TenantStorage;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
@@ -198,6 +200,22 @@ it('refuses `isolated` and unknown storage on the validated create path — isol
 
     expect(CreateTenantData::validateAndCreate(['slug' => 'acme', 'storage' => 'pooled'])->storage)->toBe('pooled')
         ->and(CreateTenantData::validateAndCreate(['slug' => 'acme'])->storage)->toBeNull();
+});
+
+it('offers `storage` to the create FORM as a choice of the creatable states, not a free-text box', function () {
+    // The frame create form is generated from this class's request schema. A `rules()` method reaches the
+    // validated write path but not the schema, so the form it left was a text input for a two-value
+    // choice; the `#[In]` attribute reaches both. Null stays a legal answer — "let the host decide"
+    // (resolver, then `default_for_new_tenants`) — so the field is optional and carries NO `default`
+    // keyword: the generator never publishes a null default, and an untouched field is omitted from the
+    // submission rather than sent as an explicit choice.
+    $schema = (new JsonSchemaGenerator)->forRequest()->generate(new ReflectionClass(CreateTenantData::class));
+    $storage = $schema['properties']['storage'];
+
+    expect($storage['enum'])->toBe([...TenantStorage::creatableValues(), null])
+        ->and($storage['enum'])->not->toContain(TenantStorage::Isolated->value)
+        ->and($storage)->not->toHaveKey('default')
+        ->and($schema['required'] ?? [])->not->toContain('storage');
 });
 
 it('names no commerce symbol in the create form either', function () {

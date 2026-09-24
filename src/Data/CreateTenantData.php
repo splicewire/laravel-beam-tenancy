@@ -2,8 +2,7 @@
 
 namespace Splicewire\Beam\Tenancy\Data;
 
-use Illuminate\Validation\Rule;
-use Spatie\LaravelData\Support\Validation\ValidationContext;
+use Spatie\LaravelData\Attributes\Validation\In;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Tenancy\TenantStorage;
@@ -47,23 +46,19 @@ class CreateTenantData extends BeamData implements MapsToModelAttributes
         public string $slug,
         public ?string $name = null,
         public ?string $ownerEmail = null,
+        /**
+         * Declared as a validation ATTRIBUTE, not a `rules()` entry, because the attribute is the one
+         * form both readers see: `validateAndCreate()` (the particle write path, 422 on anything else)
+         * and the schema generator, which emits it as the create form's `enum` — so the operator picks
+         * pooled / schema / (host decides) rather than typing into a free-text box. A `rules()` method
+         * reached only the first; the form it left behind was a text input for a two-value choice.
+         * The cases must equal {@see TenantStorage::creatable()} (a test pins it); `DecideStorage`
+         * rejects an unknown or `isolated` request a second time, so a caller that skips validation
+         * still cannot land one.
+         */
+        #[In(TenantStorage::Pooled, TenantStorage::Schema)]
         public ?string $storage = null,
     ) {}
-
-    /**
-     * Reached through `validateAndCreate()` — the REST provisioning endpoint's path — NOT through the
-     * schema surface, which reads no rules (the emitted form carries no enum; spec review, ticket 04).
-     * `DecideStorage` rejects an unknown or `isolated` request a second time, so a caller that skips
-     * validation still cannot land one.
-     *
-     * @return array<string, mixed>
-     */
-    public static function rules(ValidationContext $context): array
-    {
-        return [
-            'storage' => ['nullable', 'string', Rule::in(TenantStorage::creatableValues())],
-        ];
-    }
 
     /**
      * The declared write map (particle-doctrine: a class in an `editData:` slot declares it, never relies

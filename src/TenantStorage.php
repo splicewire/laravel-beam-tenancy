@@ -27,7 +27,8 @@ enum TenantStorage: string
 
     /**
      * The two states a tenant may be CREATED into; Isolated only ever arrives by migration. The single
-     * source for that rule — `DecideStorage` and `CreateTenantData::rules()` both derive from it.
+     * source for that rule — `DecideStorage` derives from it, and `CreateTenantData::$storage`'s `#[In]`
+     * (a constant expression, so it lists the cases) is pinned equal to it by a test.
      *
      * @return list<self>
      */
