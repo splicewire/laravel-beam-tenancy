@@ -298,14 +298,16 @@ it('emits ISO-8601 strings, not raw Carbon', function () {
         ->and($data->createdAt)->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/');
 });
 
-it('carries exactly 18 props — the 9 OOTB, ticket 03 §A1\'s 8 owner-local, and pooled-storage 04\'s `storage`', function () {
+it('carries exactly 19 props — the 9 OOTB, ticket 03 §A1\'s 8 owner-local, pooled-storage 04\'s `storage` and APP-06\'s folded `steps`', function () {
     $props = array_map(
         fn ($p) => $p->getName(),
         (new ReflectionClass(TenantData::class))->getConstructor()->getParameters()
     );
 
-    expect($props)->toHaveCount(18)
+    expect($props)->toHaveCount(19)
         ->and($props)->toContain('storage')
+        // app-walkthrough APP-06 (APP-10): per-step state folded from `statuses`, what the timeline draws.
+        ->and($props)->toContain('steps')
         // The 8 the fold added, named so a future deletion has to argue with this list.
         ->and($props)->toContain('parentTenantId', 'llmConfig', 'scaffoldPackSlugs', 'statusChannel', 'primaryHost', 'statuses', 'isBusy', 'isStalled')
         // Still not the commerce 5 — those arrive as a contribution, and a seam guard in this suite

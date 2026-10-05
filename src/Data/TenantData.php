@@ -11,6 +11,7 @@ use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Tenancy\Summary\TenantsSummaryProvider;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Workflows\Data\StatusEventData;
+use Splicewire\Beam\Workflows\Data\StatusStepData;
 
 /**
  * The neutral tenants-admin LIST + DETAIL resource.
@@ -146,9 +147,17 @@ class TenantData extends BeamData
         /** The absolute host the tenant is reached at — folded from `domains`, never rebuilt by a caller. */
         #[NotInList]
         public ?string $primaryHost = null,
-        /** @var list<StatusEventData> */
+        /** @var list<StatusEventData> The raw timeline: History. */
         #[NotInList]
         public array $statuses = [],
+        /**
+         * Per-step state of the newest run, folded from {@see $statuses} (app-walkthrough APP-06, APP-10): what a
+         * timeline draws, so a finished pipeline never looks stuck on a step that only ever said it started.
+         *
+         * @var list<StatusStepData>
+         */
+        #[NotInList]
+        public array $steps = [],
         /** Provisioning or pack-apply work still in flight — the UI's subscribe/poll stop condition. */
         #[NotInList]
         public bool $isBusy = false,
@@ -181,10 +190,11 @@ class TenantData extends BeamData
             // nothing ever called `->include()` on them — so a Lazy prop here would be a field that
             // never reaches the wire. The declared `statusEvents` include is what makes materializing
             // them cost nothing, which is the reason the laziness existed in the first place.
-            statuses: $tenant->statusTimeline()
+            statuses: $statuses = $tenant->statusTimeline()
                 ->map(fn ($activity) => StatusEventData::fromActivity($activity))
                 ->values()
                 ->all(),
+            steps: StatusStepData::fold($statuses),
             isBusy: $tenant->isBusy(),
             isStalled: $tenant->provisioningIsStalled(),
             storage: $tenant->storage()->value,
