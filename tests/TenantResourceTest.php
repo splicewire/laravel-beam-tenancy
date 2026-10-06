@@ -147,7 +147,7 @@ it('carries the nav placement that descended from tower with the teardown', func
     // per realm, because nav is read off `definitions($realm)`, the arm RealmResourceRegistry::apply()
     // actually reaches. (`editData` below could not be re-homed that way: the resource path passes
     // `$realm === null` and gets the base back untouched.)
-    expect($resource->section)->toBe('platform')
+    expect($resource->section)->toBe('tenants')
         ->and($resource->navOrder)->toBe(1)
         ->and($resource->routeName)->toBe('tenants.index');
 });

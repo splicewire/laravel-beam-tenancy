@@ -87,7 +87,7 @@ use Splicewire\Beam\Workflows\Data\StatusStepData;
     // arm, which is the one `RealmResourceRegistry::apply()` actually overlays. (The resource path
     // passes `$realm === null` and gets the base back untouched, which is why `editData` below could NOT
     // be re-homed that way — a trap this map has fallen into three times.)
-    section: 'platform',
+    section: 'tenants', // the operator rail's Tenants task section (ux-walkthrough UX-09, IA-10)
     navOrder: 1,
     routeName: 'tenants.index',
     // The create-SCHEMA escape hatch (ADR-0156 §83): the schema endpoint emits the create form the
