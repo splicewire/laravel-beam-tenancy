@@ -17,6 +17,7 @@ use Splicewire\Beam\Accounts\Facades\BeamDemo;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Splicewire\Beam\Tenancy\Tenant;
+use Spatie\Permission\Guard;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Jobs\CreateDatabase;
@@ -367,7 +368,12 @@ class DemoTenantSeeder extends Seeder
             );
 
             if (in_array($role, [Role::Owner, Role::Admin], true) && ! $tenantUser->hasRole('Admin')) {
-                $tenantUser->assignRole('Admin');
+                // Found or created first (build.qa): the Admin role comes from a host's permission-seeding provisioning
+                // step, which may run after the storage is ready or not at all here, and assigning a role that does not
+                // exist throws mid-seed. Where it exists (one global role on the flagship) this finds it. With spatie teams
+                // on and no global Admin, it creates a TEAM-scoped Admin under the current team id (review-r1), which is
+                // harmless for a demo seed.
+                $tenantUser->assignRole(config('permission.models.role')::findOrCreate('Admin', Guard::getDefaultName($tenantUser)));
             }
         });
     }
