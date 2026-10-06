@@ -47,6 +47,11 @@ function hostWithTenantDatabases(): void
 
     Artisan::registerCommand(new RecordingTenantsMigrateCommand);
 
+    // The recording host RECORDS provisioning without creating a schema, so it records the in-tenant seat too rather
+    // than performing it (this harness has no tenant schema and, deliberately, no permission tables). The seat itself is
+    // proven against real tenant schemas at the flagship (DemoTenantSeatsAreUsableTest).
+    app()->bind(DemoTenantSeeder::class, fn () => recordingSeeder());
+
     app()->singleton(StatusEmitter::class, fn ($app) => new StatusEmitter($app['config'], fn () => $app['events']));
     app()->singleton(StatusManager::class, fn ($app) => new StatusManager($app->make(StatusEmitter::class)));
 
@@ -352,4 +357,43 @@ it('ships an underscore default, matching every tenant id already in the estate'
 
     expect($shipped['demo']['tenant']['slug'])->toBe('beam_demo')
         ->and($shipped['demo']['tenant']['provision'])->toBeTrue();
+});
+
+/**
+ * The seats must be USABLE (nomination 2026-10-06 01:40Z; launch row b8d2a72d). A central `tenant_users` seat alone is
+ * refused by a host's `ResolveTenantUser` ("You are not a member of this tenant.") until the tenant's own schema holds the
+ * seat's `TenantUser`. Measured on the flagship: demo-owner had the central owner pivot and no tenant row, so its own
+ * workspace answered 403. On a host whose tenant storage is ready the seeder seats each subject IN the tenant too, the way
+ * `Tenant::assignOwner()` does: the TenantUser, plus the tenant `Admin` role for the Owner and Admin seats.
+ */
+function recordingSeeder(): DemoTenantSeeder
+{
+    return new class extends DemoTenantSeeder
+    {
+        /** @var list<array{email: string, role: string}> */
+        public array $seated = [];
+
+        protected function seatInTenant(Illuminate\Database\Eloquent\Model $tenant, Illuminate\Contracts\Auth\Authenticatable $user, Role $role): void
+        {
+            $this->seated[] = ['email' => $user->getAttribute('email'), 'role' => $role->value];
+        }
+    };
+}
+
+it('seats every shared subject in the tenant once its storage is ready', function () {
+    hostWithTenantDatabases();
+    $seeder = app(DemoTenantSeeder::class);
+    $seeder->run();
+
+    expect(collect($seeder->seated)->pluck('email')->sort()->values()->all())
+        ->toBe(collect(BeamDemo::subjects())->filter(fn ($s) => $s['shared'])->keys()->map(fn ($k) => BeamDemo::email($k))->sort()->values()->all());
+    expect(collect($seeder->seated)->pluck('role')->all())->toContain(Role::Owner->value, Role::Admin->value, Role::Member->value);
+});
+
+it('seats nobody in the tenant when its storage is not ready, and keeps the central seats', function () {
+    $seeder = recordingSeeder();
+    $seeder->run();
+
+    expect($seeder->seated)->toBe([])
+        ->and(Tenant::find(config('beam.tenancy.demo.tenant.slug'))->members())->toHaveCount(3);
 });

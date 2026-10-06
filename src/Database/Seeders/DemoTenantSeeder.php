@@ -14,6 +14,7 @@ use Splicewire\Beam\Accounts\Database\Seeders\DemoTeamSeeder;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Accounts\Facades\BeamDemo;
+use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Splicewire\Beam\Tenancy\Tenant;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
@@ -115,7 +116,7 @@ class DemoTenantSeeder extends Seeder
 
         $tenant = $this->tenant();
 
-        $this->provision($tenant);
+        $ready = $this->provision($tenant);
 
         $userModel = BeamAccounts::userModel();
         $password = Hash::make((string) config('beam.accounts.demo.password', 'password'));
@@ -131,9 +132,17 @@ class DemoTenantSeeder extends Seeder
             $tenant->assignMember($user, $subject['role']);
             $this->accept($tenant, $user);
 
+            if ($ready) {
+                $this->seatInTenant($tenant, $user, $subject['role']);
+            }
+
             if ($subject['role'] === Role::Owner) {
                 $this->recordOwner($tenant, $user);
             }
+        }
+
+        if (! $ready) {
+            $this->command?->warn('beam-tenancy: demo seats are central only — the tenant\'s storage is not ready, so a host\'s ResolveTenantUser will refuse them until its schema holds their TenantUser.');
         }
 
         $this->command?->info(
@@ -208,18 +217,18 @@ class DemoTenantSeeder extends Seeder
      * than a throw — including the missing `tenants:migrate`, which simply is not registered in a
      * harness that does not boot stancl's provider.
      */
-    protected function provision(Model $tenant): void
+    protected function provision(Model $tenant): bool
     {
         if (! config('beam.tenancy.demo.tenant.provision', true)) {
             $this->command?->warn('beam-tenancy: demo tenant storage not provisioned (beam.tenancy.demo.tenant.provision is off).');
 
-            return;
+            return false;
         }
 
         if (! $tenant instanceof TenantWithDatabase) {
             $this->command?->warn('beam-tenancy: demo tenant storage not provisioned — the configured tenant model has no database of its own.');
 
-            return;
+            return false;
         }
 
         $manager = $this->databaseManager($tenant);
@@ -227,7 +236,7 @@ class DemoTenantSeeder extends Seeder
         if ($manager === null) {
             $this->command?->warn('beam-tenancy: demo tenant storage not provisioned — no tenancy.database.managers entry for this host\'s driver.');
 
-            return;
+            return false;
         }
 
         if (! $manager->databaseExists((string) $tenant->database()->getName())) {
@@ -263,6 +272,8 @@ class DemoTenantSeeder extends Seeder
         if ($migrated && $tenant->provisioning_status !== TenantProvisioningStatus::Active->value) {
             $tenant->markActive();
         }
+
+        return $migrated;
     }
 
     /**
@@ -335,12 +346,38 @@ class DemoTenantSeeder extends Seeder
     }
 
     /**
+     * Seat a subject IN the tenant's own schema: its `TenantUser`, and the tenant `Admin` role for an Owner or Admin
+     * seat. The same tenant half `Tenant::assignOwner()` writes (launch row b8d2a72d).
+     *
+     * A central `tenant_users` seat alone is not a usable seat: a host's `ResolveTenantUser` answers 403 "You are not a
+     * member of this tenant." until this row exists, so every seeded demo seat was unusable (measured on the flagship:
+     * demo-owner was refused its own workspace). Called only when {@see provision()} reports the storage ready.
+     * Idempotent: the row is upserted and the role assigned only when not already held.
+     */
+    protected function seatInTenant(Model $tenant, Authenticatable $user, Role $role): void
+    {
+        $tenant->run(function () use ($user, $role): void {
+            $tenantUser = TenantUser::updateOrCreate(
+                ['id' => $user->getKey()],
+                [
+                    'name' => $user->getAttribute('name'),
+                    'email' => $user->getAttribute('email'),
+                    'password' => $user->getAttribute('password'),
+                ],
+            );
+
+            if (in_array($role, [Role::Owner, Role::Admin], true) && ! $tenantUser->hasRole('Admin')) {
+                $tenantUser->assignRole('Admin');
+            }
+        });
+    }
+
+    /**
      * Point the tenant's `owner_email` at the Owner-role subject.
      *
-     * Deliberately NOT `Tenant::assignOwner()`, which additionally `run()`s inside the tenant's
-     * own schema to upsert a per-tenant `TenantUser`. That requires a provisioned tenant database;
-     * a seeder must work on a host that has not provisioned one, and the central seat is the whole
-     * of what this seeder claims to establish.
+     * Not `Tenant::assignOwner()` itself: that also re-attaches the pivot and runs inside the tenant unconditionally, and
+     * a seeder must still work on a host whose tenant storage is not ready. The tenant half `assignOwner()` writes is
+     * {@see seatInTenant()}, applied to every shared seat when the storage is ready.
      */
     protected function recordOwner(Model $tenant, Authenticatable $user): void
     {
