@@ -64,8 +64,14 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     protected $keyType = 'string';
 
-    /** Add the canonical tenant identity to status timeline rows before they are persisted. */
+    /** Activitylog 5 subject hook; Activitylog 4 calls tapActivity instead. */
     public function beforeActivityLogged(Activity $activity, string $event): void
+    {
+        $this->tapActivity($activity, $event);
+    }
+
+    /** Add canonical identity before persistence without replacing status properties. */
+    public function tapActivity(Activity $activity, string $event): void
     {
         if ($activity->log_name !== config('beam.workflows.status_log_name', 'status')
             || ! in_array($event, ['running', 'complete'], true)) {

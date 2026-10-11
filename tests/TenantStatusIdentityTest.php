@@ -27,6 +27,7 @@ beforeEach(function () {
         $table->string('causer_id')->nullable();
         $table->json('properties')->nullable();
         $table->json('attribute_changes')->nullable();
+        $table->uuid('batch_uuid')->nullable();
         $table->string('event')->nullable();
         $table->timestamps();
     });
