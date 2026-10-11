@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\Contracts\Activity;
 use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
@@ -62,6 +63,20 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public $incrementing = false;
 
     protected $keyType = 'string';
+
+    /** Add the canonical tenant identity to status timeline rows before they are persisted. */
+    public function beforeActivityLogged(Activity $activity, string $event): void
+    {
+        if ($activity->log_name !== config('beam.workflows.status_log_name', 'status')
+            || ! in_array($event, ['running', 'complete'], true)) {
+            return;
+        }
+
+        $activity->properties = $activity->properties->merge([
+            'tenant_name' => $this->name,
+            'tenant_slug' => $this->slug,
+        ]);
+    }
 
     /**
      * Mint a fresh run id so every Display status event of this attempt (provisioning or pack-apply)
