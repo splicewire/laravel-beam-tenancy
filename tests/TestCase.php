@@ -102,6 +102,18 @@ class TestCase extends Orchestra
         // Structure caching points at `app_path('Data')` by default, which does not exist here, and
         // a cached reflection analysis carried across runs is exactly what a harness should not have.
         $app['config']->set('data.structure_caching.enabled', false);
+
+        // This harness creates the central audit table as `activity_log` (TenantResourceTest) but does
+        // NOT boot spatie's ActivitylogServiceProvider (getPackageProviders names only what it needs),
+        // so spatie's published `config/activitylog.php` default `table_name => 'activity_log'` is never
+        // merged. `CentralActivityLog extends` spatie's Activity with NO `$table`, and the two majors
+        // beam declares (`^4.0|^5.0`) resolve the table differently: 5.x hardcodes
+        // `$table = 'activity_log'`, but 4.x's `Activity::__construct()` does
+        // `setTable(config('activitylog.table_name'))` — which is null here, so Eloquent infers
+        // `central_activity_logs` from the class name and inserts/reads miss the `activity_log` table
+        // the fixture created. Register the key the real host gets from spatie's default config so the
+        // model and the schema agree under BOTH majors.
+        $app['config']->set('activitylog.table_name', 'activity_log');
     }
 
     protected function defineDatabaseMigrations(): void
