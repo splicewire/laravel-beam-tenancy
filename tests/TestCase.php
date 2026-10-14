@@ -6,6 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 use Rushing\Popcorn\Laravel\PopcornServiceProvider;
+use Spatie\Activitylog\ActivitylogServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
@@ -38,6 +39,20 @@ class TestCase extends Orchestra
             // (registry-kernel 27 D3). `MachineIdentityKindRegistryConformanceTest` pins that
             // tripwire directly rather than trusting this line.
             PopcornServiceProvider::class,
+
+            // spatie/laravel-activitylog, same omission as the two above: testbench does NOT
+            // auto-discover, so without this line spatie's published `config/activitylog.php` is
+            // never merged and `config('activitylog')` is empty in this suite. Real hosts boot this
+            // provider; the harness must too, because the central audit trail (CentralActivityLog,
+            // used by TenantResourceTest's timeline and the DemoTenantSeeder status stamps) depends
+            // on that config under spatie v4 — 4.x reads `config('activitylog.table_name')` in
+            // `Activity::__construct()` (null here -> the `$table`-less CentralActivityLog infers
+            // `central_activity_logs` instead of the `activity_log` the fixture created) and its
+            // `CauserResolver` constructor reads `config('activitylog.default_auth_driver')` (missing
+            // key -> ErrorException). 5.x hardcodes the table and needs neither key, which is why the
+            // suite was green on the v5 composer resolves; booting the provider makes BOTH majors
+            // (beam declares `^4.0|^5.0`) agree with the fixture.
+            ActivitylogServiceProvider::class,
 
             BeamTenancyServiceProvider::class,
         ];
@@ -102,18 +117,6 @@ class TestCase extends Orchestra
         // Structure caching points at `app_path('Data')` by default, which does not exist here, and
         // a cached reflection analysis carried across runs is exactly what a harness should not have.
         $app['config']->set('data.structure_caching.enabled', false);
-
-        // This harness creates the central audit table as `activity_log` (TenantResourceTest) but does
-        // NOT boot spatie's ActivitylogServiceProvider (getPackageProviders names only what it needs),
-        // so spatie's published `config/activitylog.php` default `table_name => 'activity_log'` is never
-        // merged. `CentralActivityLog extends` spatie's Activity with NO `$table`, and the two majors
-        // beam declares (`^4.0|^5.0`) resolve the table differently: 5.x hardcodes
-        // `$table = 'activity_log'`, but 4.x's `Activity::__construct()` does
-        // `setTable(config('activitylog.table_name'))` — which is null here, so Eloquent infers
-        // `central_activity_logs` from the class name and inserts/reads miss the `activity_log` table
-        // the fixture created. Register the key the real host gets from spatie's default config so the
-        // model and the schema agree under BOTH majors.
-        $app['config']->set('activitylog.table_name', 'activity_log');
     }
 
     protected function defineDatabaseMigrations(): void
