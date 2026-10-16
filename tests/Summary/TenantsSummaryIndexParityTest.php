@@ -102,3 +102,21 @@ it('holds on the neutral declaration too, where both reads see the whole roster'
 
     expect($figure)->toBe(3)->and($figure)->toBe($total);
 });
+
+/**
+ * The one boundary both reads pass is the operator realm entitlement (the scope narrows it, never replaces it), so
+ * both refuse alike: an actor without the entitlement, and a guest (`tenants` declares no Public Read, ADR-0230).
+ */
+it('refuses the summary and the index alike to an actor without the operator entitlement, and to a guest', function (?User $actor) {
+    parityTenant('acme');
+    Gate::define('entitlement:os.operate', fn ($user) => $user !== null && $user->getAuthIdentifier() === 1);
+    $actor === null ? auth()->forgetGuards() : test()->actingAs($actor);
+
+    foreach (['tenants', 'a-tenants'] as $key) {
+        test()->getJson("frame/resources/{$key}/summary")->assertForbidden();
+        test()->getJson("frame/resources/{$key}")->assertForbidden();
+    }
+})->with([
+    'an actor without os.operate' => fn () => (new User)->forceFill(['id' => 2]),
+    'a guest' => null,
+]);

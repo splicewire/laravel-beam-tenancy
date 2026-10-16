@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Gate;
@@ -40,6 +41,11 @@ beforeEach(function () {
     app(ParticleResourceRegistry::class)->loadRealmMap(['operator' => ['tenants', 'a-tenants']]);
     Gate::define('entitlement:os.operate', fn ($user) => $user !== null);
     test()->actingAs((new User)->forceFill(['id' => 1]));
+
+    // The provider reads its actor from the request, as frame's summary route serves it (ADR-0230: a null request
+    // actor is a guest). Outside HTTP the harness's request has no user resolver, so `actingAs()` alone would reach
+    // the gate but not the request; this gives it the resolver Laravel's AuthServiceProvider gives every request.
+    request()->setUserResolver(fn ($guard = null) => auth()->guard($guard)->user());
 });
 
 /** A tenant row with the provisioning state and suspension the figures group by. */
@@ -129,3 +135,32 @@ it('counts through the declared scope, never the bare table', function () {
         ->and($figures['active'])->toBe(1)
         ->and($figures['failed'])->toBe(1);
 });
+
+/**
+ * The boundary those figures pass is the operator realm entitlement, and only that: an actor without it, and a guest
+ * (`tenants` declares no Public Read, ADR-0230), are refused before anything is counted, on both declarations.
+ */
+it('refuses an actor without the operator entitlement, and a guest', function (?User $actor) {
+    tenantRow('acme', 'active');
+    Gate::define('entitlement:os.operate', fn ($user) => $user !== null && $user->getAuthIdentifier() === 1);
+    $actor === null ? auth()->forgetGuards() : test()->actingAs($actor);
+
+    $neutral = AttributedParticleDiscovery::resourceFromAttribute(TenantData::class);
+    app(ParticleResourceRegistry::class)->register(new ParticleResource(
+        key: 'a-tenants',
+        backing: Tenant::class,
+        data: TenantData::class,
+        frame: true,
+        label: 'A tenants',
+        scope: fn (Builder $query) => $query->where('name', 'like', 'A%'),
+        summaryProvider: $neutral->summaryProvider,
+    ));
+
+    foreach (['tenants', 'a-tenants'] as $key) {
+        expect(fn () => summaryOf(app(ParticleResourceRegistry::class)->definition($key)))
+            ->toThrow(AuthorizationException::class);
+    }
+})->with([
+    'an actor without os.operate' => fn () => (new User)->forceFill(['id' => 2]),
+    'a guest' => null,
+]);
