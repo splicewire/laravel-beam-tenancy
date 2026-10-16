@@ -48,7 +48,7 @@ use Splicewire\Beam\Realm\Contracts\TenancyContext;
  *
  * Same shape and same fallback order as `Splicewire\Satellite\Support\SatelliteTenancy::centralConnection()`.
  * The two were duplicated for want of a home below them both; beam core's {@see TenancyContext} port
- * (ADR-0236, host-binding-seam ticket 01) is that home, and this helper now delegates to it —
+ * (ADR-0239, host-binding-seam ticket 01) is that home, and this helper now delegates to it —
  * kept as the package-local static spelling because an audit sweeping a table it does not own wants
  * a one-line call, not a container dance in a docblock example.
  *
@@ -61,7 +61,7 @@ class TenancyConnections
 {
     public static function central(): ?string
     {
-        // `null`, not the default's NAME — the semantics live on the port now (ADR-0236): handing
+        // `null`, not the default's NAME — the semantics live on the port now (ADR-0239): handing
         // back `config('database.default')` would look identical and behave differently the moment
         // tenancy has swapped the default out from under the caller mid-request.
         return app(TenancyContext::class)->centralConnection();

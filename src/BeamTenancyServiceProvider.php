@@ -294,7 +294,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * The stancl adapter for beam core's {@see TenancyContext} port (ADR-0236). Plain `bind()` over
+     * The stancl adapter for beam core's {@see TenancyContext} port (ADR-0239). Plain `bind()` over
      * core's `bindIf` — the supersession lane: installing this package IS the posture declaration,
      * and the pair is order-independent. A host overrides by binding later still.
      */

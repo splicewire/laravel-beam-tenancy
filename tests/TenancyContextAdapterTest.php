@@ -8,7 +8,7 @@ use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 use Splicewire\Beam\Tenancy\Tenant;
 
 /**
- * The stancl adapter for beam core's TenancyContext port (ADR-0236 / host-binding-seam ticket 02):
+ * The stancl adapter for beam core's TenancyContext port (ADR-0239 / host-binding-seam ticket 02):
  * the live-tenant half core's default deliberately answers false/null, plus the delegation that
  * retired TenancyConnections' documented duplication.
  */
@@ -39,7 +39,7 @@ class TenancyContextAdapterTest extends TestCase
         $this->assertNull($context->currentTenantId());
         // This harness DECLARES a central split: stancl's testbench config sets
         // `tenancy.database.central_connection = 'testing'` and that connection exists — so the
-        // declared-and-resolvable answer is its name. Honest per ADR-0236.
+        // declared-and-resolvable answer is its name. Honest per ADR-0239.
         $this->assertSame('testing', $context->centralConnection());
         $this->assertTrue($context->isMultiTenant());
 

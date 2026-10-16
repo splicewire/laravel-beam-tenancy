@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Config;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
 
 /**
- * The stancl-backed adapter for beam core's {@see TenancyContext} port (ADR-0236; this package's
+ * The stancl-backed adapter for beam core's {@see TenancyContext} port (ADR-0239; this package's
  * ADR-0003 companion note): the live half — "is a tenant initialized NOW, which tenant" — that
  * core's {@see \Splicewire\Beam\Realm\CentralTenancyContext} deliberately answers false/null.
  *
