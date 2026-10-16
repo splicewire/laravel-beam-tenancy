@@ -28,6 +28,10 @@ use Rushing\Popcorn\Registries\RegistryKey;
  * - `~/Herd/standwell/app/Providers/TenancyServiceProvider.php:27-35` — five steps whose classes are
  *   app-local (`App\Jobs\Tenant\*`) and share NAMES with tower's.
  *
+ * Since 2026-10-16 (ADR-0003) the flagship's copy is gone: this package's own provider wires the
+ * TenantCreated listener and resolves the pipeline from here AT FIRE TIME. standwell's hand-wired
+ * copy remains and is the reason `beam.tenancy.wire_stancl_events` exists as an escape hatch.
+ *
  * ⚠️ **CORRECTED 2026-08-31, same day: standwell CANNOT use this registry, and an earlier version of
  * this docblock said it could.** That host requires neither `splicewire/tower` nor
  * `splicewire/laravel-beam-tenancy` — `vendor/splicewire/` there holds beam, satellite, connector and

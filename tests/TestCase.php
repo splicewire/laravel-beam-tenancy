@@ -60,6 +60,14 @@ class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
+        // A testbench app is not a stancl host: with the package's default-on host wiring
+        // (host-binding-seam ticket 02) left on, every `Tenant::create()` in this suite would fire
+        // the TenantCreated listener against an empty step registry (a no-op, but noise) and —
+        // worse — `tenancy()->initialize()` would start running stancl's DatabaseTenancyBootstrapper
+        // against the sqlite harness. The wiring tests flip these back on per-case.
+        $app['config']->set('beam.tenancy.wire_stancl_events', false);
+        $app['config']->set('beam.tenancy.wire_host_routing', false);
+
         // beam-core BINDS the seed manifest as a singleton in its REGISTER phase, and this harness
         // does not boot beam-core. Bound here (before the package providers register) so
         // BeamTenancyServiceProvider's own seed registration has the same container to land in that
