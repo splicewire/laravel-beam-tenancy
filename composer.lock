@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0f84ec47d6bc112db414babf71c33112",
+    "content-hash": "6bc0631beb3c57784aa61b3a2cadb33a",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -7200,7 +7200,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam",
-                "reference": "0eb534d54a3f11bafb6c0e88521b09ded43b8a4c"
+                "reference": "edddc8896eccee48927102da854a0c26f797931f"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -14057,6 +14057,85 @@
                 "source": "https://github.com/bobthecow/psysh/tree/v0.12.24"
             },
             "time": "2026-06-29T15:41:09+00:00"
+        },
+        {
+            "name": "rushing/laravel-auth-vault",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/stephenr85/laravel-auth-vault.git",
+                "reference": "f6968823345ee1fff68619499d70e8c453212041"
+            },
+            "require": {
+                "illuminate/contracts": "^11.0|^12.0|^13.0",
+                "illuminate/database": "^11.0|^12.0|^13.0",
+                "illuminate/support": "^11.0|^12.0|^13.0",
+                "php": "^8.2",
+                "rushing/laravel-schema-convergence": "*",
+                "spatie/laravel-data": "^4.0|^5.0"
+            },
+            "require-dev": {
+                "laravel/pint": "^1.0",
+                "orchestra/testbench": "^9.0|^10.0",
+                "pestphp/pest": "^2.0|^3.0",
+                "pestphp/pest-plugin-laravel": "^2.0|^3.0",
+                "wikimedia/composer-merge-plugin": "^2.1"
+            },
+            "default-branch": true,
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-main": "1.0.x-dev"
+                },
+                "laravel": {
+                    "providers": [
+                        "Rushing\\AuthVault\\AuthVaultServiceProvider"
+                    ]
+                },
+                "merge-plugin": {
+                    "include": [
+                        "composer.local.json"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Rushing\\AuthVault\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Rushing\\AuthVault\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "@php vendor/bin/pest"
+                ],
+                "lint": [
+                    "vendor/bin/pint"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Stephen Rushing",
+                    "email": "stephen@rushing.dev"
+                }
+            ],
+            "description": "A generic per-tenant credential vault for Laravel — encrypted, append-only secret storage with safe rotation and an OAuth token-refresh primitive. Stores API keys and OAuth tokens; knows nothing of connectors, tenancy, or billing.",
+            "keywords": [
+                "credentials",
+                "encryption",
+                "laravel",
+                "oauth",
+                "rotation",
+                "secrets",
+                "vault"
+            ],
+            "time": "2026-09-09T18:20:24+00:00"
         },
         {
             "name": "rushing/php-graphine",
