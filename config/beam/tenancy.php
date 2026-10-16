@@ -318,4 +318,28 @@ return [
         // credential surface a host opts into, not a default every pooled tenant carries.
         'direct_access_roles' => (bool) env('BEAM_TENANCY_DIRECT_ACCESS_ROLES', false),
     ],
+
+    // ── Host wiring this package ships by default (host-binding-seam ticket 02, ADR-0003) ────────
+    // Before these, the stancl event map and tenant-route mounting existed only as a 299-line
+    // hand-copy in the flagship's TenancyServiceProvider — so a fresh starter's tenants had no
+    // provisioning pipeline subscriber at all. Both keys are escape hatches for a host that
+    // hand-wires its own copy (standwell does, with app-local step classes): set false there
+    // instead of double-dispatching. The package harness also sets both false — a testbench app is
+    // not a stancl host.
+    'wire_stancl_events' => (bool) env('BEAM_TENANCY_WIRE_STANCL_EVENTS', true),
+    'wire_host_routing' => (bool) env('BEAM_TENANCY_WIRE_HOST_ROUTING', true),
+
+    // The provisioning pipeline name the TenantCreated listener resolves from the step registry —
+    // AT FIRE TIME, so tower's boot-phase registration and any Supersede override are always seen.
+    // No pipeline registered under this name → the listener no-ops (this package ships no default
+    // pipeline; the tier that owns the step classes registers them).
+    'provisioning' => [
+        'pipeline' => env('BEAM_TENANCY_PROVISIONING_PIPELINE', 'default'),
+    ],
+
+    // The saloon-kernel tenancy bridge (ADR-0004): where the kernel transport contract is loaded,
+    // this package plain-binds its TenancyContextBridge over the transport's Null default — dropping
+    // tenant context across a nested kernel dispatch is a defect, not a default, on a tenancy host.
+    // Set false to get the Null behavior back.
+    'bind_kernel_context_bridge' => (bool) env('BEAM_TENANCY_BIND_KERNEL_CONTEXT_BRIDGE', true),
 ];

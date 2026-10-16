@@ -37,7 +37,8 @@
         "stancl/virtualcolumn": "^1.0",
         "wikimedia/composer-merge-plugin": "^2.1",
         "rushing/php-graphine": "dev-main",
-        "nikic/php-parser": "^5.8"
+        "nikic/php-parser": "^5.8",
+        "rushing/laravel-auth-vault": "*"
     },
     "autoload": {
         "psr-4": {
@@ -281,6 +282,24 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-workflows.git"
+        },
+        {
+            "type": "path",
+            "url": "../../rushing/laravel-saloon-kernel",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "path",
+            "url": "../../rushing/laravel-auth-vault",
+            "options": {
+                "symlink": true
+            }
         }
-    ]
+    ],
+    "suggest": {
+        "rushing/laravel-saloon-kernel": "In-process kernel transport; this package then binds its TenancyContextBridge so nested dispatches keep tenant context (ADR-0004)",
+        "rushing/laravel-auth-vault": "Vault secrets; this package then binds TenancyVaultContextGuard as the fail-closed partition precondition"
+    }
 }

@@ -47,7 +47,15 @@ function beamTenancyDataClasses(): array
         $relative = substr($path, strlen($root) + 1, -4);
         $class = 'Splicewire\\Beam\\Tenancy\\'.str_replace('/', '\\', $relative);
 
-        if (! class_exists($class)) {
+        try {
+            if (! class_exists($class)) {
+                continue;
+            }
+        } catch (\Throwable) {
+            // A class implementing an OPTIONAL interface (suggest-tier: Loopback/TenancyContextBridge
+            // against saloon-kernel, Vault/TenancyVaultContextGuard against auth-vault — ADR-0004)
+            // fatals at link time when that interface is not installed in this harness. Not a Data
+            // class either way; the registration guards (`interface_exists`) own the runtime story.
             continue;
         }
 

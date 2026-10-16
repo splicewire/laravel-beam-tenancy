@@ -5,7 +5,11 @@ namespace Splicewire\Beam\Tenancy;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
+use Rushing\AuthVault\Contracts\VaultContextGuard;
+use Rushing\SaloonKernel\Contracts\KernelContextBridge;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
 use Spatie\LaravelPackageTools\Package;
@@ -13,7 +17,13 @@ use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
+use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
+use Splicewire\Beam\Tenancy\Contracts\TenantDnsProvider;
+use Splicewire\Beam\Tenancy\Contracts\TenantEdgeProvider;
+use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
+use Splicewire\Beam\Tenancy\Loopback\TenancyContextBridge;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Provision\Gcp\WorkloadIdentityCredentialResolver;
 use Splicewire\Beam\Provision\Tofu\CabTokenMinter;
@@ -45,8 +55,15 @@ use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Support\StanclTenancyContext;
+use Splicewire\Beam\Tenancy\Vault\TenancyVaultContextGuard;
+use Stancl\JobPipeline\JobPipeline;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
+use Stancl\Tenancy\Events;
+use Stancl\Tenancy\Jobs;
+use Stancl\Tenancy\Listeners;
 use Stancl\Tenancy\Listeners\UpdateSyncedResource;
+use Stancl\Tenancy\Middleware;
 
 /**
  * The PURE-tenancy substrate the whole estate FKs to: `tenants` (stancl core) + `domains`,
@@ -89,6 +106,10 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->registerMachineIdentityKinds();
         $this->registerProvisioningSteps();
         $this->registerMachineIdentityAwareSyncListener();
+        $this->registerTenancyContext();
+        $this->registerDomainProviderDefaults();
+        $this->registerKernelContextBridge();
+        $this->registerVaultContextGuard();
 
         $this->app->singleton(IsolatedDatabaseDestination::class, function ($app) {
             $config = $app['config']->get('beam.tenancy.isolated_database', []);
@@ -272,6 +293,188 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->app->bind(UpdateSyncedResource::class, MachineIdentityAwareUpdateSyncedResource::class);
     }
 
+    /**
+     * The stancl adapter for beam core's {@see TenancyContext} port (ADR-0236). Plain `bind()` over
+     * core's `bindIf` — the supersession lane: installing this package IS the posture declaration,
+     * and the pair is order-independent. A host overrides by binding later still.
+     */
+    protected function registerTenancyContext(): void
+    {
+        $this->app->bind(TenancyContext::class, StanclTenancyContext::class);
+    }
+
+    /**
+     * Default DNS + edge providers (host-binding-seam ticket 02, F3 row 6). Before this, the two
+     * contracts were bound only by the flagship's provider, and an unbound host crashed
+     * not-instantiable INSIDE the first provisioning job (`CreateTenantDomain` resolves both) — the
+     * worst discovery location available. {@see NullDomainProvider}'s own docblock says why the
+     * no-op is truthful (wildcard DNS + wildcard cert). `bindIf` in the container lane: a host with
+     * real Cloudflare/Plesk drivers binds them and wins.
+     */
+    protected function registerDomainProviderDefaults(): void
+    {
+        $this->app->bindIf(TenantDnsProvider::class, NullDomainProvider::class);
+        $this->app->bindIf(TenantEdgeProvider::class, NullDomainProvider::class);
+    }
+
+    /**
+     * The saloon-kernel tenancy bridge (this package's ADR-0004; owner ruling 2026-10-16: the
+     * mechanism lives with the tenancy package, "not just tower"). Soft edge: the contract arrives
+     * via require-dev/suggest, never a hard require, so the `interface_exists` guard keeps this
+     * registration free on hosts without the transport — the licenser-shaped optional-integration
+     * pattern. Plain `bind()` deliberately supersedes saloon-kernel's own
+     * `bindIf(NullContextBridge)`: where tenancy is installed, dropping tenant context across a
+     * nested kernel dispatch is a defect, not a default. `beam.tenancy.bind_kernel_context_bridge`
+     * is the escape hatch for a host that wants the Null behavior back.
+     */
+    protected function registerKernelContextBridge(): void
+    {
+        if (! interface_exists(KernelContextBridge::class)) {
+            return;
+        }
+
+        if (! (bool) ($this->app['config']->get('beam.tenancy.bind_kernel_context_bridge') ?? true)) {
+            return;
+        }
+
+        $this->app->bind(KernelContextBridge::class, TenancyContextBridge::class);
+    }
+
+    /**
+     * The vault partition guard default (host-binding-seam ticket 02, lift C2-2). Same soft edge as
+     * the kernel bridge — auth-vault is suggest-tier — but the supersession lane, not `bindIf`:
+     * auth-vault's own provider `bindIf`s a `NullVaultContextGuard` and registers FIRST
+     * (name-sorted package order), so a `bindIf` here would lose the race and leave every real host
+     * on the no-op. Where tenancy is installed, fail-closed is the default worth having; a host
+     * wanting something else binds later and wins, exactly as the flagship used to.
+     */
+    protected function registerVaultContextGuard(): void
+    {
+        if (! interface_exists(VaultContextGuard::class)) {
+            return;
+        }
+
+        $this->app->bind(VaultContextGuard::class, TenancyVaultContextGuard::class);
+    }
+
+    /**
+     * The stancl event map, owned by the tenancy package (this package's ADR-0003; lifted from the
+     * flagship's 299-line `TenancyServiceProvider` on 2026-10-16 — the only copy in the estate, so
+     * tower-starter tenants had NO pipeline subscriber and a saved tenant row proved nothing ran,
+     * exactly the trap `docs/agents/traps/tenancy.md` warns about).
+     *
+     * The provisioning pipeline resolves from {@see TenantProvisioningStepRegistry} **at event-fire
+     * time**, not at boot: the flagship read `stepsFor()` once while building its listener array, so
+     * a later registration or a supersession (`OnKeyDuplicate::Supersede` — the registry's own
+     * override path) was invisible to an already-wired listener. No pipeline registered → the
+     * listener no-ops: this package ships NO default pipeline (see registerProvisioningSteps()), and
+     * firing an empty guess would be an answer the provenance rule forbids.
+     *
+     * `beam.tenancy.wire_stancl_events` (default on) is the host escape hatch — a host that
+     * hand-wires its own map (standwell does, with app-local step classes) sets it false instead of
+     * double-dispatching.
+     */
+    protected function bootStanclEventMap(): void
+    {
+        if (! (bool) ($this->app['config']->get('beam.tenancy.wire_stancl_events') ?? true)) {
+            return;
+        }
+
+        Event::listen(Events\TenantCreated::class, function (Events\TenantCreated $event): void {
+            $registry = $this->app->make(TenantProvisioningStepRegistry::class);
+            $pipeline = (string) $this->app['config']->get('beam.tenancy.provisioning.pipeline', 'default');
+
+            if (! in_array($pipeline, $registry->names(), true)) {
+                return;
+            }
+
+            (JobPipeline::make($registry->stepsFor($pipeline))
+                ->send(fn () => $event->tenant)
+                // Queued: the queue driver decides inline (sync) vs deferred (redis).
+                ->shouldBeQueued(true)
+                ->toListener())($event);
+        });
+
+        Event::listen(Events\TenantDeleted::class, function (Events\TenantDeleted $event): void {
+            (JobPipeline::make([Jobs\DeleteDatabase::class])
+                ->send(fn () => $event->tenant)
+                ->shouldBeQueued(true)
+                ->toListener())($event);
+        });
+
+        // Infra steps recorded in the provisioning timeline. Guarded: `markProvisioning` lives on
+        // THIS package's Tenant; a host that opted out of bindTenantModel keeps stancl's model and
+        // simply records nothing.
+        Event::listen(Events\DatabaseCreated::class, function (Events\DatabaseCreated $event): void {
+            if (method_exists($event->tenant, 'markProvisioning')) {
+                $event->tenant->markProvisioning('provisioning_create_database', 'Creating database');
+            }
+        });
+        Event::listen(Events\DatabaseMigrated::class, function (Events\DatabaseMigrated $event): void {
+            if (method_exists($event->tenant, 'markProvisioning')) {
+                $event->tenant->markProvisioning('provisioning_migrate_database', 'Running migrations');
+            }
+        });
+
+        Event::listen(Events\TenancyInitialized::class, Listeners\BootstrapTenancy::class);
+        Event::listen(Events\TenancyEnded::class, Listeners\RevertToCentralContext::class);
+
+        // Container-resolved, so registerMachineIdentityAwareSyncListener()'s rebind applies.
+        Event::listen(Events\SyncedResourceSaved::class, UpdateSyncedResource::class);
+    }
+
+    /**
+     * Tenant route mounting + tenancy middleware priority, owned here with the event map (same
+     * flagship lift, same `wire_host_routing` escape hatch). The routes group is file_exists-guarded:
+     * a host without `routes/tenant.php` (the tower starter today) is a no-op, and adding the file IS
+     * the opt-in.
+     *
+     * ⚠️ The `Application::booted()` callback is where the route table becomes complete — at the
+     * flagship, 294 routes arrive here (api-surface-coherence 105). Beam arms per-resource discovery
+     * on its own booted() callback, which fires BEFORE tenant routes exist, so the re-run is
+     * triggered HERE, the one site that knows the table just grew.
+     * {@see ResourceDiscoveryAutoMounter::mount()} is idempotent. Host-policy middleware on
+     * discovered routes (the flagship's `auth:sanctum` on `circuits.discovery`) stays host-side, in a
+     * booted() hook registered after this one.
+     */
+    protected function bootHostRouting(): void
+    {
+        if (! (bool) ($this->app['config']->get('beam.tenancy.wire_host_routing') ?? true)) {
+            return;
+        }
+
+        $this->makeTenancyMiddlewareHighestPriority();
+
+        $this->app->booted(function (): void {
+            if (file_exists(base_path('routes/tenant.php'))) {
+                Route::group([], base_path('routes/tenant.php'));
+            }
+
+            if ((bool) $this->app['config']->get('beam.core.discovery.enabled', true)
+                && class_exists(ResourceDiscoveryAutoMounter::class)) {
+                $this->app->make(ResourceDiscoveryAutoMounter::class)->mount();
+            }
+        });
+    }
+
+    protected function makeTenancyMiddlewareHighestPriority(): void
+    {
+        $tenancyMiddleware = [
+            // Even higher priority than the initialization middleware.
+            Middleware\PreventAccessFromCentralDomains::class,
+
+            Middleware\InitializeTenancyByDomain::class,
+            Middleware\InitializeTenancyBySubdomain::class,
+            Middleware\InitializeTenancyByDomainOrSubdomain::class,
+            Middleware\InitializeTenancyByPath::class,
+            Middleware\InitializeTenancyByRequestData::class,
+        ];
+
+        foreach (array_reverse($tenancyMiddleware) as $middleware) {
+            $this->app[HttpKernelContract::class]->prependToMiddlewarePriority($middleware);
+        }
+    }
+
     public function configurePackage(Package $package): void
     {
         $package
@@ -354,6 +557,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         $this->bindTenantModel();
+        $this->bootStanclEventMap();
+        $this->bootHostRouting();
 
         // The `tenant` morph alias — the wire identifier every polymorphic row pointing at a Tenant
         // stores (billable, subscriptions, bills, grants …), and the permission-token prefix

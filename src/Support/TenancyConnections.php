@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Tenancy\Support;
 
 use Illuminate\Support\Facades\Config;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 
 /**
  * Which connection a **central** (non-tenant) table is reachable on at THIS host.
@@ -45,8 +46,11 @@ use Illuminate\Support\Facades\Config;
  * purpose and the default connection IS central — which is both correct for a single-database host and
  * exactly what makes the check keep working in a harness that models one.
  *
- * Same shape and same fallback order as `Splicewire\Satellite\Support\SatelliteTenancy::centralConnection()`,
- * duplicated rather than shared because satellite sits ABOVE beam and beam-tenancy cannot depend upward.
+ * Same shape and same fallback order as `Splicewire\Satellite\Support\SatelliteTenancy::centralConnection()`.
+ * The two were duplicated for want of a home below them both; beam core's {@see TenancyContext} port
+ * (ADR-0236, host-binding-seam ticket 01) is that home, and this helper now delegates to it —
+ * kept as the package-local static spelling because an audit sweeping a table it does not own wants
+ * a one-line call, not a container dance in a docblock example.
  *
  * ⚠️ This is a **connection resolver, not a pin justification.** A model that holds a central table still
  * declares `protected $connection = 'central'` with its `@central-floor` citation, because
@@ -57,18 +61,10 @@ class TenancyConnections
 {
     public static function central(): ?string
     {
-        $configured = Config::get('tenancy.database.central_connection');
-
-        if (is_string($configured) && $configured !== '' && Config::get("database.connections.{$configured}") !== null) {
-            return $configured;
-        }
-
-        // `null`, not the default's NAME. Handing back `config('database.default')` would look identical
-        // and behave differently the moment tenancy has swapped the default out from under the caller
-        // mid-request: the name resolved at read time is whatever is current, whereas `null` means "the
-        // connection you would have used anyway", which is the honest statement when the host has told
-        // us nothing about a central/tenant split.
-        return null;
+        // `null`, not the default's NAME — the semantics live on the port now (ADR-0236): handing
+        // back `config('database.default')` would look identical and behave differently the moment
+        // tenancy has swapped the default out from under the caller mid-request.
+        return app(TenancyContext::class)->centralConnection();
     }
 
     /**
