@@ -45,6 +45,7 @@ use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
 use Stancl\Tenancy\Listeners\UpdateSyncedResource;
 
@@ -72,6 +73,46 @@ use Stancl\Tenancy\Listeners\UpdateSyncedResource;
  */
 class BeamTenancyServiceProvider extends PackageServiceProvider
 {
+    /**
+     * Pin each `database`-driver cache store that names no connection to the central connection.
+     *
+     * A `database` cache store with `connection => null` resolves the DEFAULT connection when it is first built, and
+     * database tenancy switches the default to `tenant` inside `$tenant->run()`. Every tenancy host in the estate keeps
+     * its `cache` and `cache_locks` tables central only (measured 2026-10-16: satellite, tower, the flagship and the five
+     * starters; none has a tenant cache migration), so the first cache use inside a tenant context hit
+     * `relation "cache" does not exist`. On the market deploy that was spatie/laravel-permission clearing its cache when
+     * DemoTenantSeeder::seatInTenant() created the tenant Admin role, which aborted `splicewire:beam:install` (launch
+     * row qitem-20261016172734-edfd969d; G6).
+     *
+     * Pinned at register time because that is when the default IS central; read later, the default may already be the
+     * tenant's (the trap {@see TenancyConnections::central()} documents). A store that names its own connection keeps it,
+     * and an unset lock connection follows that store connection (as Laravel's own `lock_connection ?? connection`
+     * does); non-database stores are untouched.
+     *
+     * @param  array<string, mixed>  $stores  `config('cache.stores')`
+     * @return array<string, mixed>
+     */
+    public static function pinCentralDatabaseCacheStores(array $stores, string $central): array
+    {
+        foreach ($stores as $name => $store) {
+            if (! is_array($store) || ($store['driver'] ?? null) !== 'database') {
+                continue;
+            }
+
+            // Locks follow the store's own connection (Laravel resolves `lock_connection ?? connection`), so an unset
+            // lock connection is pinned to whatever the store ends up on: the host's choice, or central.
+            if (($store['connection'] ?? null) === null || $store['connection'] === '') {
+                $stores[$name]['connection'] = $central;
+            }
+
+            if (($store['lock_connection'] ?? null) === null || $store['lock_connection'] === '') {
+                $stores[$name]['lock_connection'] = $stores[$name]['connection'];
+            }
+        }
+
+        return $stores;
+    }
+
     public function register(): void
     {
         // pooled-storage ticket 05: stancl's `tenants:migrate` learns to skip pooled tenants. A
@@ -85,6 +126,15 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->app->extend(\Stancl\Tenancy\Commands\MigrateFresh::class, fn ($command, $app) => $app->make(PooledAwareTenantsMigrateFresh::class));
 
         parent::register();
+
+        // Launch row qitem-20261016172734-edfd969d: pin every `database` cache store that names no connection to the
+        // CENTRAL connection, now, while the default still is central. See {@see pinCentralDatabaseCacheStores()}.
+        $stores = $this->app['config']->get('cache.stores', []);
+        $central = TenancyConnections::central() ?? $this->app['config']->get('database.default');
+
+        if (is_array($stores) && is_string($central) && $central !== '') {
+            $this->app['config']->set('cache.stores', self::pinCentralDatabaseCacheStores($stores, $central));
+        }
 
         $this->registerMachineIdentityKinds();
         $this->registerProvisioningSteps();
