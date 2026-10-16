@@ -71,7 +71,7 @@ class ProvisioningDispatchTest extends TestCase
         $this->assertCount(1, SecondRecordingProvisioningStep::$ran);
     }
 
-    public function test_the_escape_hatch_unwires_everything(): void
+    public function test_changing_the_escape_hatch_after_boot_does_not_unregister_the_listener(): void
     {
         // This case re-enters the app with the gate off, as a hand-wiring host (standwell) would.
         $this->app['config']->set('beam.tenancy.wire_stancl_events', false);

@@ -21,7 +21,7 @@ use Splicewire\Beam\Realm\Contracts\TenancyContext;
  * hand-copied probes this port retires were exactly the convention of asking "is the helper loaded"
  * when the question was "is a tenant initialized".
  */
-final class StanclTenancyContext implements TenancyContext
+class StanclTenancyContext implements TenancyContext
 {
     public function isMultiTenant(): bool
     {
