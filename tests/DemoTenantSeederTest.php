@@ -290,6 +290,32 @@ it('does not claim Active for a tenant whose storage it could not provision', fu
     expect($tenant->provisioning_status)->toBeNull();
 });
 
+/**
+ * A tenant pass that FAILS must fail the seed (launch G6, integrator ruling 2026-10-17). The seeder called
+ * `tenants:migrate`, ignored its exit code, and marked the tenant Active, so a fresh fixture reported "demo tenant
+ * ready" while its tenant schema never got its shared estate. That hid two reds for weeks.
+ */
+it('fails the seed, and claims nothing Active, when the scoped tenants:migrate exits non-zero', function () {
+    hostWithTenantDatabases();
+    Artisan::registerCommand(new class extends Illuminate\Console\Command
+    {
+        protected $signature = 'tenants:migrate {--tenants=*}';
+
+        public function handle(): int
+        {
+            $this->error('SQLSTATE[42P01]: relation "lunar_products" does not exist');
+
+            return self::FAILURE;
+        }
+    });
+
+    expect(fn () => app(DemoTenantSeeder::class)->run())
+        ->toThrow(RuntimeException::class, 'tenants:migrate exited 1');
+
+    expect(Tenant::find(config('beam.tenancy.demo.tenant.slug'))?->provisioning_status)
+        ->not->toBe(TenantProvisioningStatus::Active->value);
+});
+
 it('migrates the new schema, SCOPED to its own tenant key and never fanned out', function () {
     hostWithTenantDatabases();
 

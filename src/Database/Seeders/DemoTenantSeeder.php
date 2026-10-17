@@ -9,6 +9,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use InvalidArgumentException;
+use RuntimeException;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Database\Seeders\DemoTeamSeeder;
 use Splicewire\Beam\Accounts\Enums\Role;
@@ -301,7 +302,18 @@ class DemoTenantSeeder extends Seeder
             return false;
         }
 
-        Artisan::call('tenants:migrate', ['--tenants' => [(string) $tenant->getKey()]]);
+        $exit = Artisan::call('tenants:migrate', ['--tenants' => [(string) $tenant->getKey()]]);
+
+        // A failing tenant pass fails the seed (launch G6, integrator ruling 2026-10-17). Ignoring the exit code
+        // reported "demo tenant ready" over a tenant schema that never got its shared estate, and hid two reds for weeks.
+        if ($exit !== 0) {
+            throw new RuntimeException(sprintf(
+                'beam-tenancy: tenants:migrate exited %d for demo tenant "%s"; the tenant schema is not migrated. %s',
+                $exit,
+                (string) $tenant->getKey(),
+                trim(Artisan::output()),
+            ));
+        }
 
         return true;
     }
