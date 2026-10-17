@@ -52,6 +52,12 @@ function hostWithTenantDatabases(): void
     // proven against real tenant schemas at the flagship (DemoTenantSeatsAreUsableTest).
     app()->bind(DemoTenantSeeder::class, fn () => recordingSeeder());
 
+    withTenancyTimeline();
+}
+
+/** The Display timeline `Tenant::markActive()` writes: beam-workflows' Status bindings and the central `activity_log`. */
+function withTenancyTimeline(): void
+{
     app()->singleton(StatusEmitter::class, fn ($app) => new StatusEmitter($app['config'], fn () => $app['events']));
     app()->singleton(StatusManager::class, fn ($app) => new StatusManager($app->make(StatusEmitter::class)));
 
@@ -419,22 +425,7 @@ it('keeps the seats central and warns when the ready tenant schema has no users 
     Illuminate\Support\Facades\Event::listen(\Stancl\Tenancy\Events\TenancyInitialized::class, \Stancl\Tenancy\Listeners\BootstrapTenancy::class);
     Illuminate\Support\Facades\Event::listen(\Stancl\Tenancy\Events\TenancyEnded::class, \Stancl\Tenancy\Listeners\RevertToCentralContext::class);
     Artisan::registerCommand(new RecordingTenantsMigrateCommand);
-    app()->singleton(StatusEmitter::class, fn ($app) => new StatusEmitter($app['config'], fn () => $app['events']));
-    app()->singleton(StatusManager::class, fn ($app) => new StatusManager($app->make(StatusEmitter::class)));
-    Schema::create('activity_log', function (\Illuminate\Database\Schema\Blueprint $table) {
-        $table->id();
-        $table->string('log_name')->nullable();
-        $table->text('description');
-        $table->string('subject_type')->nullable();
-        $table->string('subject_id')->nullable();
-        $table->string('event')->nullable();
-        $table->string('causer_type')->nullable();
-        $table->string('causer_id')->nullable();
-        $table->json('attribute_changes')->nullable();
-        $table->json('properties')->nullable();
-        $table->uuid('batch_uuid')->nullable();
-        $table->timestamps();
-    });
+    withTenancyTimeline();
 
     $warnings = [];
     $seeder = new DemoTenantSeeder;

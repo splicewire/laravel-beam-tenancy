@@ -125,7 +125,7 @@ class DemoTenantSeeder extends Seeder
         $seatsInTenant = $ready && $this->tenantHoldsUsers($tenant);
 
         if ($ready && ! $seatsInTenant) {
-            $this->command?->warn('beam-tenancy: demo seats are central only — the tenant schema has no users table (this host owns users centrally), so there is no TenantUser to seat.');
+            $this->command?->warn('beam-tenancy: the tenant schema holds no users table; demo seats stay central.');
         }
 
         $userModel = BeamAccounts::userModel();
@@ -390,8 +390,8 @@ class DemoTenantSeeder extends Seeder
     /**
      * Does the tenant's own schema hold the table a {@see TenantUser} lives in?
      *
-     * Asked inside the tenant, of the CURRENT schema explicitly on Postgres: `Schema::hasTable` follows the tenant
-     * `search_path` and can answer from a central `public.users` that a schema-per-tenant connection still reaches.
+     * Asked inside the tenant, of the CURRENT schema explicitly on Postgres: never by resolving the bare name through the
+     * session's `search_path`, which on a schema-per-tenant connection still reaches the central `public.users`.
      */
     protected function tenantHoldsUsers(Model $tenant): bool
     {
