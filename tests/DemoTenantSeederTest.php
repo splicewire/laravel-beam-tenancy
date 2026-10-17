@@ -397,3 +397,81 @@ it('seats nobody in the tenant when its storage is not ready, and keeps the cent
     expect($seeder->seated)->toBe([])
         ->and(Tenant::find(config('beam.tenancy.demo.tenant.slug'))->members())->toHaveCount(3);
 });
+
+/**
+ * A host that owns `users` CENTRAL-only (a Commerce-shaped starter: beam-accounts' `publish_auth_migrations` 'absent')
+ * provisions and migrates the demo tenant, but its schema holds no `users` table, so there is no `TenantUser` to seat.
+ * The seeder entered the tenant anyway and `TenantUser::updateOrCreate` failed with "relation users does not exist"
+ * (launch G6 discovery c, 2026-10-17, tenantfresh_commerce_*). The tenant here is REAL storage: a sqlite tenant database
+ * created by stancl's own manager and entered through its database bootstrapper, migrated with nothing, which is what a
+ * Commerce tenant pass leaves of `users`.
+ */
+it('keeps the seats central and warns when the ready tenant schema has no users table', function () {
+    $dir = sys_get_temp_dir().'/beam-tenancy-central-seat-'.bin2hex(random_bytes(4));
+    mkdir($dir);
+    app()->useDatabasePath($dir);
+
+    config([
+        'tenancy.database.managers.sqlite' => \Stancl\Tenancy\TenantDatabaseManagers\SQLiteDatabaseManager::class,
+        'tenancy.bootstrappers' => [\Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper::class],
+    ]);
+    app()->singleton(\Stancl\Tenancy\Tenancy::class);
+    Illuminate\Support\Facades\Event::listen(\Stancl\Tenancy\Events\TenancyInitialized::class, \Stancl\Tenancy\Listeners\BootstrapTenancy::class);
+    Illuminate\Support\Facades\Event::listen(\Stancl\Tenancy\Events\TenancyEnded::class, \Stancl\Tenancy\Listeners\RevertToCentralContext::class);
+    Artisan::registerCommand(new RecordingTenantsMigrateCommand);
+    app()->singleton(StatusEmitter::class, fn ($app) => new StatusEmitter($app['config'], fn () => $app['events']));
+    app()->singleton(StatusManager::class, fn ($app) => new StatusManager($app->make(StatusEmitter::class)));
+    Schema::create('activity_log', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->string('log_name')->nullable();
+        $table->text('description');
+        $table->string('subject_type')->nullable();
+        $table->string('subject_id')->nullable();
+        $table->string('event')->nullable();
+        $table->string('causer_type')->nullable();
+        $table->string('causer_id')->nullable();
+        $table->json('attribute_changes')->nullable();
+        $table->json('properties')->nullable();
+        $table->uuid('batch_uuid')->nullable();
+        $table->timestamps();
+    });
+
+    $warnings = [];
+    $seeder = new DemoTenantSeeder;
+    $seeder->setCommand(new class($warnings) extends Illuminate\Console\Command
+    {
+        public function __construct(private array &$warnings)
+        {
+            parent::__construct('recording');
+        }
+
+        public function warn($string, $verbosity = null)
+        {
+            $this->warnings[] = (string) $string;
+        }
+
+        public function info($string, $verbosity = null) {}
+    });
+
+    try {
+        $seeder->run();
+
+        $tenant = Tenant::find(config('beam.tenancy.demo.tenant.slug'));
+        $tenantDb = $dir.'/'.$tenant->database()->getName();
+
+        expect(file_exists($tenantDb))->toBeTrue('the tenant storage was not really provisioned, so this test proves nothing')
+            ->and(RecordingTenantsMigrateCommand::$calls)->toHaveCount(1)
+            ->and($tenant->members())->toHaveCount(3)
+            ->and($tenant->owner_email)->toBe(BeamDemo::email(Role::Owner->value))
+            ->and(implode("\n", $warnings))->toContain('no users table');
+
+        // Central context is restored, and the tenant schema is untouched: still no users table.
+        expect(tenancy()->initialized)->toBeFalse();
+        $tenant->run(fn () => expect(Schema::hasTable('users'))->toBeFalse());
+    } finally {
+        foreach (glob($dir.'/*') ?: [] as $file) {
+            unlink($file);
+        }
+        rmdir($dir);
+    }
+});

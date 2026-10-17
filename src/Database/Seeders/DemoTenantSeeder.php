@@ -119,6 +119,15 @@ class DemoTenantSeeder extends Seeder
 
         $ready = $this->provision($tenant);
 
+        // A ready tenant can still have no users table: a host that owns `users` CENTRAL-only (a Commerce-shaped starter,
+        // beam-accounts' `publish_auth_migrations` 'absent') migrates no `users` into its tenants, so there is no
+        // TenantUser to seat and entering the tenant to write one fails (launch G6, 2026-10-17). Its seats stay central.
+        $seatsInTenant = $ready && $this->tenantHoldsUsers($tenant);
+
+        if ($ready && ! $seatsInTenant) {
+            $this->command?->warn('beam-tenancy: demo seats are central only — the tenant schema has no users table (this host owns users centrally), so there is no TenantUser to seat.');
+        }
+
         $userModel = BeamAccounts::userModel();
         $password = Hash::make((string) config('beam.accounts.demo.password', 'password'));
 
@@ -133,7 +142,7 @@ class DemoTenantSeeder extends Seeder
             $tenant->assignMember($user, $subject['role']);
             $this->accept($tenant, $user);
 
-            if ($ready) {
+            if ($seatsInTenant) {
                 $this->seatInTenant($tenant, $user, $subject['role']);
             }
 
@@ -375,6 +384,29 @@ class DemoTenantSeeder extends Seeder
                 // harmless for a demo seed.
                 $tenantUser->assignRole(config('permission.models.role')::findOrCreate('Admin', Guard::getDefaultName($tenantUser)));
             }
+        });
+    }
+
+    /**
+     * Does the tenant's own schema hold the table a {@see TenantUser} lives in?
+     *
+     * Asked inside the tenant, of the CURRENT schema explicitly on Postgres: `Schema::hasTable` follows the tenant
+     * `search_path` and can answer from a central `public.users` that a schema-per-tenant connection still reaches.
+     */
+    protected function tenantHoldsUsers(Model $tenant): bool
+    {
+        return (bool) $tenant->run(function (): bool {
+            $model = new TenantUser;
+            $connection = $model->getConnection();
+
+            if ($connection->getDriverName() !== 'pgsql') {
+                return $connection->getSchemaBuilder()->hasTable($model->getTable());
+            }
+
+            return $connection->selectOne(
+                'select 1 from information_schema.tables where table_schema = current_schema() and table_name = ?',
+                [$model->getTable()],
+            ) !== null;
         });
     }
 
