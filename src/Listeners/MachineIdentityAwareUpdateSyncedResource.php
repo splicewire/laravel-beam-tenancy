@@ -60,6 +60,9 @@ use Stancl\Tenancy\Listeners\UpdateSyncedResource;
  * `withoutEvents` guards — is the parent's behaviour, reproduced verbatim, because this is a
  * surgical override of an inlined branch and not a reimplementation.
  *
+ * One host-shape tolerance sits beside it (launch G6, 2026-10-17): a central model with no `tenants()`
+ * relation gets the central upsert and no mapping step, instead of the parent's fatal on a null `->tenants`.
+ *
  * Bound over the stancl class in beam-tenancy's provider, so a host keeps listing
  * `Stancl\Tenancy\Listeners\UpdateSyncedResource::class` in its own `$listen` map (the flagship's
  * `TenancyServiceProvider:117` does) and the container hands it this one. Laravel resolves a
@@ -99,6 +102,14 @@ class MachineIdentityAwareUpdateSyncedResource extends UpdateSyncedResource
                 event(new SyncedResourceChangedInForeignDatabase($event->model, null));
             }
         });
+
+        // A central model with no `tenants()` relation (a starter host's `App\Models\User`, which is not a stancl
+        // `SyncMaster`) has no mapping to read or attach, and the parent would fatal on `->tenants` being null (launch
+        // G6, 2026-10-17). The central upsert above is all such a host supports. Its seat writers (DemoTenantSeeder,
+        // `Tenant::assignOwner()`) write the central seat themselves.
+        if (! method_exists($centralModel, 'tenants')) {
+            return collect();
+        }
 
         $currentTenantMapping = function ($model) use ($event) {
             return ((string) $model->pivot->tenant_id) === ((string) $event->tenant->getTenantKey());

@@ -8,6 +8,7 @@ use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\User;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\UserWithoutTenants;
 use Stancl\Tenancy\Contracts\Tenant as TenantContract;
 use Stancl\Tenancy\Events\SyncedResourceSaved;
 use Stancl\Tenancy\Listeners\UpdateSyncedResource;
@@ -169,6 +170,26 @@ it('binds the machine-identity-aware listener over the stancl class-string', fun
     // The swap is a container binding precisely so no host has to edit its `$listen` map.
     expect(app(UpdateSyncedResource::class))
         ->toBeInstanceOf(MachineIdentityAwareUpdateSyncedResource::class);
+});
+
+/**
+ * A starter host's central `User` has no `tenants()` relation (launch G6, 2026-10-17): fresh Tower's DemoTenantSeeder
+ * died here with "Call to a member function contains() on null" the first time it seated a demo user in the tenant.
+ * Such a host still gets the central upsert; there is no relation to read a mapping from or attach one through, so
+ * the mapping step is skipped. The seeder and `Tenant::assignOwner()` write the central seat themselves.
+ */
+it('syncs to a central user model that has no tenants relation, without a mapping step', function () {
+    config(['auth.providers.users.model' => UserWithoutTenants::class]);
+    $tenant = Tenant::create(['id' => 'acme', 'name' => 'Acme']);
+    $user = UserWithoutTenants::create(['name' => 'Demo Owner', 'email' => 'demo-owner@example.test', 'password' => 'x']);
+
+    $tenant->run(fn () => TenantUser::updateOrCreate(
+        ['id' => $user->id],
+        ['name' => 'Demo Owner Renamed', 'email' => $user->email, 'password' => $user->password],
+    ));
+
+    expect($user->fresh()->name)->toBe('Demo Owner Renamed')
+        ->and(DB::table('tenant_users')->where('user_id', $user->id)->count())->toBe(0);
 });
 
 it('fails open when the host has not published the machine-identity table', function () {
