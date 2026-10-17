@@ -55,13 +55,18 @@ use Stancl\Tenancy\Listeners\UpdateSyncedResource;
  *
  * ## What this class changes
  *
- * Exactly one decision: **skip the attach** when the user holds a machine identity in that tenant.
- * Everything else — the central upsert, the foreign-database fan-out, the returned tenant set, the
- * `withoutEvents` guards — is the parent's behaviour, reproduced verbatim, because this is a
- * surgical override of an inlined branch and not a reimplementation.
+ * Exactly two decisions, both inside the mapping step, which runs after the central upsert:
  *
- * One host-shape tolerance sits beside it (launch G6, 2026-10-17): a central model with no `tenants()`
- * relation gets the central upsert and no mapping step, instead of the parent's fatal on a null `->tenants`.
+ * 1. **Skip the attach** when the user holds a machine identity in that tenant. This is the reason
+ *    for the class.
+ * 2. **Skip the whole mapping step** when the central model has no `tenants()` relation. A starter
+ *    host's `App\Models\User` is not a stancl `SyncMaster`, and the parent fatals on its null
+ *    `->tenants` (launch G6, 2026-10-17). Such a host gets the central upsert and an empty tenant set,
+ *    so there is no attach and no fan-out. Its seat writers write the central seat themselves.
+ *
+ * Everything else — the central upsert, the fan-out for a model that has the relation, the returned
+ * tenant set, the `withoutEvents` guards — is the parent's behaviour, reproduced verbatim, because
+ * this is a surgical override of an inlined branch and not a reimplementation.
  *
  * Bound over the stancl class in beam-tenancy's provider, so a host keeps listing
  * `Stancl\Tenancy\Listeners\UpdateSyncedResource::class` in its own `$listen` map (the flagship's
