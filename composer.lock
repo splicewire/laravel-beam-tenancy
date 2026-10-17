@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "cafc4613e8d8fc042a783fda1508d253",
+    "content-hash": "bef04ed8162a1f7d6cbee2e87016ac3b",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -6660,7 +6660,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam",
-                "reference": "7ebbbd68e72fce79e541047c61d17c77c8b991c3"
+                "reference": "f8b1d16f559e921456c4944552795bb16778e091"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -6737,6 +6737,7 @@
                     ]
                 },
                 "merge-plugin": {
+                    "merge-dev": true,
                     "include": [
                         "composer.local.json"
                     ]
@@ -6778,7 +6779,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-accounts",
-                "reference": "5fcaaa409a87b0fe107074d9c2431c45d02bf3d7"
+                "reference": "a827e8c86f3695279e168912e6787b3f06b680f1"
             },
             "require": {
                 "firebase/php-jwt": "^6.0|^7.0",
@@ -10618,12 +10619,12 @@
             "version": "v5.7.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/phpdotenv/phpdotenv.git",
+                "url": "https://github.com/vlucas/phpdotenv.git",
                 "reference": "301c07936b16d88628b126b01d082ba153cf4c40"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpdotenv/phpdotenv/zipball/301c07936b16d88628b126b01d082ba153cf4c40",
+                "url": "https://api.github.com/repos/vlucas/phpdotenv/zipball/301c07936b16d88628b126b01d082ba153cf4c40",
                 "reference": "301c07936b16d88628b126b01d082ba153cf4c40",
                 "shasum": ""
             },
@@ -13505,9 +13506,9 @@
         {
             "name": "rushing/laravel-auth-vault",
             "version": "dev-main",
-            "dist": {
-                "type": "path",
-                "url": "../../rushing/laravel-auth-vault",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/stephenr85/laravel-auth-vault.git",
                 "reference": "f6968823345ee1fff68619499d70e8c453212041"
             },
             "require": {
@@ -13525,6 +13526,7 @@
                 "pestphp/pest-plugin-laravel": "^2.0|^3.0",
                 "wikimedia/composer-merge-plugin": "^2.1"
             },
+            "default-branch": true,
             "type": "library",
             "extra": {
                 "branch-alias": {
@@ -13578,10 +13580,7 @@
                 "secrets",
                 "vault"
             ],
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
+            "time": "2026-09-09T18:20:24+00:00"
         },
         {
             "name": "rushing/php-graphine",
