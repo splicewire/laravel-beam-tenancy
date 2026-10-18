@@ -9,27 +9,24 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Rushing\AuthVault\Contracts\VaultContextGuard;
-use Rushing\SaloonKernel\Contracts\KernelContextBridge;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
 use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
+use Rushing\SaloonKernel\Contracts\KernelContextBridge;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
+use Spatie\Permission\PermissionRegistrar;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
+use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
-use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
-use Splicewire\Beam\Realm\Contracts\TenancyContext;
-use Splicewire\Beam\Tenancy\Contracts\TenantDnsProvider;
-use Splicewire\Beam\Tenancy\Contracts\TenantEdgeProvider;
-use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
-use Splicewire\Beam\Tenancy\Loopback\TenancyContextBridge;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Provision\Gcp\WorkloadIdentityCredentialResolver;
 use Splicewire\Beam\Provision\Tofu\CabTokenMinter;
 use Splicewire\Beam\Provision\Tofu\TenantDatabaseRootConfigRenderer;
 use Splicewire\Beam\Provision\Tofu\TofuApplyDispatcher;
 use Splicewire\Beam\Provision\Tofu\TofuModulesPath;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
@@ -41,6 +38,8 @@ use Splicewire\Beam\Tenancy\Commands\PoolsDirectAccess;
 use Splicewire\Beam\Tenancy\Commands\PoolsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\Commands\PoolsRole;
+use Splicewire\Beam\Tenancy\Contracts\TenantDnsProvider;
+use Splicewire\Beam\Tenancy\Contracts\TenantEdgeProvider;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
@@ -50,8 +49,10 @@ use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit;
+use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
 use Splicewire\Beam\Tenancy\Http\Middleware\InitializeTenancyBySoleTenant;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
+use Splicewire\Beam\Tenancy\Loopback\TenancyContextBridge;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
@@ -425,6 +426,65 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * hand-wires its own map (standwell does, with app-local step classes) sets it false instead of
      * double-dispatching.
      */
+    /**
+     * Key spatie/laravel-permission's cache per tenant (L3 ticket 09 C4; a security fix, orch-lead 23:06Z).
+     *
+     * The `PermissionRegistrar` is a singleton built at boot, before any tenancy, and its constructor captures its cache
+     * store and one key (`permission.cache.key`) right then. stancl's CacheTenancyBootstrapper swaps the container's
+     * `cache` binding for a tagging manager later, but the registrar never re-resolves, so every tenant and the central
+     * app shared ONE cached permission collection, which maps each permission to role ids. Role ids are per database:
+     * whichever context filled the cache decided what the others saw. Tenant A's grants were applied to tenant B's
+     * same-id role, and a central fill left a tenant's own roles holding nothing (a seated owner refused).
+     *
+     * So once tenancy is bootstrapped (the tenant's storage is in place) the registrar's key becomes
+     * `<key>.tenant.<id>` and its loaded collection is dropped; when tenancy ends it returns to the central key and
+     * drops it again. Always on, not behind `wire_stancl_events`: a host that hand-wires stancl's events still
+     * fires these. A host without spatie/laravel-permission is untouched.
+     */
+    protected function bootPermissionCacheScoping(): void
+    {
+        if (! class_exists(PermissionRegistrar::class)) {
+            return;
+        }
+
+        Event::listen(Events\TenancyBootstrapped::class, function (Events\TenancyBootstrapped $event): void {
+            $this->scopePermissionCache((string) $event->tenancy->tenant->getTenantKey());
+        });
+        Event::listen(Events\TenancyEnded::class, function (): void {
+            $this->scopePermissionCache(null);
+        });
+
+        // A registrar first built inside a tenant reads the shared central key in its constructor: scope it then too.
+        $this->app->afterResolving(PermissionRegistrar::class, function (PermissionRegistrar $registrar): void {
+            if (function_exists('tenancy') && tenancy()->initialized) {
+                $this->applyPermissionCacheKey($registrar, (string) tenant()->getTenantKey());
+            }
+        });
+    }
+
+    /**
+     * Point an already-built permission registrar at this tenant's cache key, or the central one. A registrar nobody has
+     * built yet (or a host that never registers spatie's provider) is left alone: building one here would only fail on
+     * a host without spatie's config, and the afterResolving hook scopes it when it is built.
+     */
+    protected function scopePermissionCache(?string $tenantKey): void
+    {
+        if (! $this->app->bound(PermissionRegistrar::class) || ! $this->app->resolved(PermissionRegistrar::class)) {
+            return;
+        }
+
+        $this->applyPermissionCacheKey($this->app->make(PermissionRegistrar::class), $tenantKey);
+    }
+
+    /** Set the key and drop the collection the registrar had loaded under the previous one. */
+    protected function applyPermissionCacheKey(PermissionRegistrar $registrar, ?string $tenantKey): void
+    {
+        $key = (string) ($this->app['config']->get('permission.cache.key') ?: 'spatie.permission.cache');
+
+        $registrar->cacheKey = $tenantKey === null ? $key : "{$key}.tenant.{$tenantKey}";
+        $registrar->clearPermissionsCollection();
+    }
+
     protected function bootStanclEventMap(): void
     {
         if (! (bool) ($this->app['config']->get('beam.tenancy.wire_stancl_events') ?? true)) {
@@ -611,6 +671,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     {
         $this->bindTenantModel();
         $this->bootStanclEventMap();
+        $this->bootPermissionCacheScoping();
         $this->bootHostRouting();
 
         // The `tenant` morph alias — the wire identifier every polymorphic row pointing at a Tenant
