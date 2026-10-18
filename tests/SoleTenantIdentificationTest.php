@@ -96,6 +96,20 @@ it('ignores whatever tenant the request or its principal might name', function (
         ->assertOk()->assertJson(['tenant' => 'acme']);
 });
 
+it('refuses through the middleware as a concrete HttpException 503, wrapping the identification failure', function () {
+    // A host exception handler that maps only `HttpException` (the flagship's envelope renderer) answered 500 for the
+    // interface-only exception (ticket 07 S3 replay). The middleware raises the concrete class, carrying the original.
+    $this->withoutExceptionHandling();
+
+    try {
+        $this->getJson('sole-probe');
+        $this->fail('an empty sole-tenant install must refuse');
+    } catch (Symfony\Component\HttpKernel\Exception\HttpException $e) {
+        expect($e->getStatusCode())->toBe(503)
+            ->and($e->getPrevious())->toBeInstanceOf(SoleTenantNotIdentified::class);
+    }
+});
+
 it('raises a stancl identification failure that carries a 503', function () {
     $resolver = app(SoleTenantResolver::class);
 
