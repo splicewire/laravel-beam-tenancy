@@ -1,5 +1,6 @@
 <?php
 
+use Splicewire\Beam\Authorization\AuthenticatedReadPolicy;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Tenancy\Data\TenantData;
 
@@ -9,4 +10,5 @@ it('places tenants first in the Tenants task section', function () {
     $resource = (new ReflectionClass(TenantData::class))->getAttributes(ParticleResource::class)[0]->newInstance();
 
     expect([$resource->section, $resource->navOrder])->toBe(['tenants', 1]);
+    expect($resource->readPolicy)->toBe(AuthenticatedReadPolicy::class);
 });

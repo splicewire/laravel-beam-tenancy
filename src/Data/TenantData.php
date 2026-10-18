@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Schemastud\Frame\Attributes\Column;
 use Schemastud\Frame\Attributes\NotInList;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Authorization\AuthenticatedReadPolicy;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Tenancy\Summary\TenantsSummaryProvider;
@@ -99,6 +100,7 @@ use Splicewire\Beam\Workflows\Data\StatusStepData;
     // than contributed.
     editData: CreateTenantData::class,
     readOnly: true,
+    readPolicy: AuthenticatedReadPolicy::class,
     // The dashboard tile's figures, grouped by provisioning state rather than beam's bare `total`
     // (realm-dashboards ticket 06). Declared here because the figures are a fact about `Tenant`
     // alone and this package may not depend on the host that draws them — see the provider's docblock.
