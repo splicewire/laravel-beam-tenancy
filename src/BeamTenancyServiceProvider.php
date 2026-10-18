@@ -92,6 +92,9 @@ use Stancl\Tenancy\Middleware;
  */
 class BeamTenancyServiceProvider extends PackageServiceProvider
 {
+    /** The permission cache's intended scope: a tenant key, or null for central ({@see bootPermissionCacheScoping()}). */
+    protected ?string $permissionCacheScope = null;
+
     /**
      * Pin each `database`-driver cache store that names no connection to the central connection.
      *
@@ -410,23 +413,6 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * The stancl event map, owned by the tenancy package (this package's ADR-0003; lifted from the
-     * flagship's 299-line `TenancyServiceProvider` on 2026-10-16 — the only copy in the estate, so
-     * tower-starter tenants had NO pipeline subscriber and a saved tenant row proved nothing ran,
-     * exactly the trap `docs/agents/traps/tenancy.md` warns about).
-     *
-     * The provisioning pipeline resolves from {@see TenantProvisioningStepRegistry} **at event-fire
-     * time**, not at boot: the flagship read `stepsFor()` once while building its listener array, so
-     * a later registration or a supersession (`OnKeyDuplicate::Supersede` — the registry's own
-     * override path) was invisible to an already-wired listener. No pipeline registered → the
-     * listener no-ops: this package ships NO default pipeline (see registerProvisioningSteps()), and
-     * firing an empty guess would be an answer the provenance rule forbids.
-     *
-     * `beam.tenancy.wire_stancl_events` (default on) is the host escape hatch — a host that
-     * hand-wires its own map (standwell does, with app-local step classes) sets it false instead of
-     * double-dispatching.
-     */
-    /**
      * Key spatie/laravel-permission's cache per tenant (L3 ticket 09 C4; a security fix, orch-lead 23:06Z).
      *
      * The `PermissionRegistrar` is a singleton built at boot, before any tenancy, and its constructor captures its cache
@@ -436,10 +422,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * whichever context filled the cache decided what the others saw. Tenant A's grants were applied to tenant B's
      * same-id role, and a central fill left a tenant's own roles holding nothing (a seated owner refused).
      *
-     * So once tenancy is bootstrapped (the tenant's storage is in place) the registrar's key becomes
-     * `<key>.tenant.<id>` and its loaded collection is dropped; when tenancy ends it returns to the central key and
-     * drops it again. Always on, not behind `wire_stancl_events`: a host that hand-wires stancl's events still
-     * fires these. A host without spatie/laravel-permission is untouched.
+     * The intended scope is explicit state ({@see $permissionCacheScope}): TenancyBootstrapped (the tenant's storage is
+     * in place) sets it to the tenant, TenancyEnded sets it back to central, each before re-keying a registrar already
+     * built. A registrar first built later reads that state, never `tenancy()->initialized`: stancl clears that flag only
+     * after TenancyEnded's listeners return, so a later TenancyEnded listener would otherwise re-scope central code to
+     * the ending tenant (orch-peer HIGH on aa88f09). Always on, not behind `wire_stancl_events`: a host that hand-wires
+     * stancl's events still fires these. A host without spatie's provider is untouched.
      */
     protected function bootPermissionCacheScoping(): void
     {
@@ -454,21 +442,23 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->scopePermissionCache(null);
         });
 
-        // A registrar first built inside a tenant reads the shared central key in its constructor: scope it then too.
+        // A registrar first built after the scope changed reads the shared central key in its constructor.
         $this->app->afterResolving(PermissionRegistrar::class, function (PermissionRegistrar $registrar): void {
-            if (function_exists('tenancy') && tenancy()->initialized) {
-                $this->applyPermissionCacheKey($registrar, (string) tenant()->getTenantKey());
+            if ($this->permissionCacheScope !== null) {
+                $this->applyPermissionCacheKey($registrar, $this->permissionCacheScope);
             }
         });
     }
 
     /**
-     * Point an already-built permission registrar at this tenant's cache key, or the central one. A registrar nobody has
-     * built yet (or a host that never registers spatie's provider) is left alone: building one here would only fail on
-     * a host without spatie's config, and the afterResolving hook scopes it when it is built.
+     * Record the intended scope, then re-key the registrar if one is already built. One nobody built yet (or a host
+     * that never registers spatie's provider) is left alone: building one here would only fail on a host without
+     * spatie's config, and the afterResolving hook scopes it when it is built.
      */
     protected function scopePermissionCache(?string $tenantKey): void
     {
+        $this->permissionCacheScope = $tenantKey;
+
         if (! $this->app->bound(PermissionRegistrar::class) || ! $this->app->resolved(PermissionRegistrar::class)) {
             return;
         }
@@ -485,6 +475,23 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $registrar->clearPermissionsCollection();
     }
 
+    /**
+     * The stancl event map, owned by the tenancy package (this package's ADR-0003; lifted from the
+     * flagship's 299-line `TenancyServiceProvider` on 2026-10-16 — the only copy in the estate, so
+     * tower-starter tenants had NO pipeline subscriber and a saved tenant row proved nothing ran,
+     * exactly the trap `docs/agents/traps/tenancy.md` warns about).
+     *
+     * The provisioning pipeline resolves from {@see TenantProvisioningStepRegistry} **at event-fire
+     * time**, not at boot: the flagship read `stepsFor()` once while building its listener array, so
+     * a later registration or a supersession (`OnKeyDuplicate::Supersede` — the registry's own
+     * override path) was invisible to an already-wired listener. No pipeline registered → the
+     * listener no-ops: this package ships NO default pipeline (see registerProvisioningSteps()), and
+     * firing an empty guess would be an answer the provenance rule forbids.
+     *
+     * `beam.tenancy.wire_stancl_events` (default on) is the host escape hatch — a host that
+     * hand-wires its own map (standwell does, with app-local step classes) sets it false instead of
+     * double-dispatching.
+     */
     protected function bootStanclEventMap(): void
     {
         if (! (bool) ($this->app['config']->get('beam.tenancy.wire_stancl_events') ?? true)) {

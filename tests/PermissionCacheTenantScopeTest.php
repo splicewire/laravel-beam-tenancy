@@ -104,3 +104,20 @@ it('scopes a registrar that is first built inside a tenant', function () {
     expect(app(PermissionRegistrar::class)->cacheKey)->toBe("{$central}.tenant.acme");
     tenancy()->end();
 });
+
+// orch-peer HIGH on aa88f09: stancl clears `initialized` only after TenancyEnded's listeners return.
+it('keeps a registrar first built by a later TenancyEnded listener on the central key', function () {
+    $acme = Tenant::create(['id' => 'acme', 'slug' => 'acme']);
+    $central = (string) config('permission.cache.key');
+    $seen = null;
+    Event::listen(Events\TenancyEnded::class, function () use (&$seen): void {
+        $seen = app(PermissionRegistrar::class)->cacheKey;      // first built here, while `initialized` is still true
+    });
+
+    tenancy()->initialize($acme);
+    app()->forgetInstance(PermissionRegistrar::class);
+    tenancy()->end();
+
+    expect($seen)->toBe($central)
+        ->and(app(PermissionRegistrar::class)->cacheKey)->toBe($central);
+});
