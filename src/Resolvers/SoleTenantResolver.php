@@ -26,11 +26,18 @@ class SoleTenantResolver implements TenantResolver
         /** @var class-string<Model&Tenant> $model */
         $model = config('tenancy.tenant_model');
 
-        // At most one tenant is the designated system tenant, so three rows are enough to tell "exactly one eligible"
-        // from "two or more" without loading the whole table: three rows always hold at least two eligible ones.
-        $eligible = $model::query()->orderBy($model::make()->getKeyName())->limit(3)->get()
-            ->reject(fn (Model $tenant): bool => method_exists($tenant, 'isSystem') && $tenant->isSystem())
-            ->values();
+        // System tenants are excluded IN THE QUERY, before the limit. Nothing guarantees there is only one: limiting first
+        // and filtering after would let system rows fill the window and hide a second eligible tenant, turning an
+        // ambiguous install into a wrong answer (orch-peer HIGH, 5fafc48d). Two eligible rows are then enough to tell
+        // "exactly one" from "more than one".
+        $query = $model::query();
+
+        if (method_exists($model, 'systemRole')) {
+            $role = $model::systemRole();
+            $query->where(fn ($q) => $q->whereNull('data->role')->orWhere('data->role', '!=', $role));
+        }
+
+        $eligible = $query->orderBy($model::make()->getKeyName())->limit(2)->get();
 
         if ($eligible->count() === 1) {
             return $eligible->first();

@@ -64,6 +64,30 @@ it('refuses an ambiguous install with 503 rather than picking one', function () 
         ->and(tenancy()->initialized)->toBeFalse();
 });
 
+it('stays ambiguous when several system tenants precede two eligible ones (orch-peer HIGH, 5fafc48d)', function () {
+    // Two tenants carry the system role and sort FIRST, then two eligible tenants. A resolver that limits before it
+    // excludes system tenants sees [a, b, c], drops a and b, and wrongly serves c.
+    foreach (['a-system', 'b-system'] as $id) {
+        Tenant::create(['id' => $id, 'name' => $id])->markAsSystem();
+    }
+    Tenant::create(['id' => 'c-eligible', 'name' => 'C']);
+    Tenant::create(['id' => 'd-eligible', 'name' => 'D']);
+
+    $ambiguous = $this->getJson('sole-probe');
+    expect($ambiguous->status())->toBe(503)
+        ->and($ambiguous->json('message'))->toContain('more than one')
+        ->and(tenancy()->initialized)->toBeFalse();
+});
+
+it('identifies the one eligible tenant behind several system tenants', function () {
+    foreach (['a-system', 'b-system', 'c-system'] as $id) {
+        Tenant::create(['id' => $id, 'name' => $id])->markAsSystem();
+    }
+    Tenant::create(['id' => 'd-eligible', 'name' => 'D']);
+
+    $this->getJson('sole-probe')->assertOk()->assertJson(['tenant' => 'd-eligible']);
+});
+
 it('ignores whatever tenant the request or its principal might name', function () {
     Tenant::create(['id' => 'acme', 'name' => 'Acme']);
 
