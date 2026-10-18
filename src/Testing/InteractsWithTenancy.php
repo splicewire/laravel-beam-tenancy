@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Tenancy\Testing;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Spatie\Permission\Models\Role as SpatieRole;
@@ -13,6 +14,7 @@ use Splicewire\Beam\Tenancy\PermissionsTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\PostgreSQLSchemaManager;
 use Splicewire\Beam\Tenancy\Tenant;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
+use Stancl\Tenancy\Contracts\SyncMaster;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
 use Stancl\Tenancy\Database\Models\Domain;
@@ -193,8 +195,11 @@ trait InteractsWithTenancy
      * table, so this must create the user in whatever context it is called from — central, or inside
      * `$tenant->run()`. Memoizing globally instead would hand a tenant test a central user id and the
      * insert would fail, or worse, succeed against the wrong schema.
+     *
+     * Returns a `TenantUser` inside a tenant, and the host's configured central user model in the central context
+     * when that model is the SyncMaster (see below); hence `Authenticatable`, not `TenantUser`.
      */
-    public function rootUser(): TenantUser
+    public function rootUser(): Authenticatable
     {
         $schema = DB::selectOne('select current_schema() as s')->s;
         $this->rootUsers ??= [];
@@ -207,7 +212,20 @@ trait InteractsWithTenancy
             setPermissionsTeamId(function_exists('tenant') && tenant() ? tenant('id') : null);
         }
 
-        $user = TenantUser::firstOrCreate(
+        // Inside a tenant the root user is the tenant-side TenantUser. In the CENTRAL context it is the host's
+        // configured user model when that is the SyncMaster: a central TenantUser save takes stancl's central-context
+        // branch of UpdateSyncedResource, which this package wires for every host since host-binding-seam 02, and
+        // throws ModelNotSyncMasterException (tower-is-splicewire ticket 07). A host whose configured model is not a
+        // SyncMaster keeps the TenantUser it always got.
+        $userModel = TenantUser::class;
+        $central = ! (function_exists('tenancy') && tenancy()->initialized);
+        $configured = config('auth.providers.users.model');
+
+        if ($central && is_string($configured) && is_subclass_of($configured, SyncMaster::class)) {
+            $userModel = $configured;
+        }
+
+        $user = $userModel::firstOrCreate(
             ['email' => 'root@app.splicewire.com'],
             ['name' => 'Root', 'password' => bcrypt('password')],
         );
