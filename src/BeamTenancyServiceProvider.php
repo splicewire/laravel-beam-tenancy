@@ -50,6 +50,7 @@ use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit;
+use Splicewire\Beam\Tenancy\Http\Middleware\InitializeTenancyBySoleTenant;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
@@ -518,6 +519,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             Middleware\InitializeTenancyByDomainOrSubdomain::class,
             Middleware\InitializeTenancyByPath::class,
             Middleware\InitializeTenancyByRequestData::class,
+            // The sole-tenant initializer (tower-is-splicewire D4′): identity from the install's state, not the request.
+            InitializeTenancyBySoleTenant::class,
         ];
 
         foreach (array_reverse($tenancyMiddleware) as $middleware) {
