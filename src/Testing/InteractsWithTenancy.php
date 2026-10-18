@@ -67,7 +67,7 @@ use Stancl\Tenancy\TenantDatabaseManagers\SQLiteDatabaseManager;
  */
 trait InteractsWithTenancy
 {
-    /** @var array<string, TenantUser>|null memoized per schema — see {@see rootUser()} */
+    /** @var array<string, Authenticatable>|null memoized per schema: a TenantUser in a tenant schema, the configured central user model in the central one. See {@see rootUser()}. */
     protected ?array $rootUsers = null;
 
     /**
