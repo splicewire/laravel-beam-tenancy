@@ -36,12 +36,15 @@ class TenantSitemapBaseUrlResolver implements SitemapBaseUrlResolver
     {
         $tenant = $this->activeTenant();
 
-        if ($tenant === null) {
-            // Tenancy absent (single-tenant / central / retrofit): the config-default.
+        // Tenancy absent (single-tenant / central / retrofit), or a tenant no safe host can be built for (its slug
+        // predates the slug grammar): the config-default, never a URL around an unchecked host.
+        $host = $tenant?->routableHost();
+
+        if ($host === null) {
             return $this->fallback->baseUrl();
         }
 
-        return $this->scheme().'://'.$tenant->primaryHost();
+        return $this->scheme().'://'.$host;
     }
 
     /**

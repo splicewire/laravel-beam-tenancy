@@ -329,7 +329,10 @@ it('projects the 8 owner-local props off the Tenant alone', function () {
         'llm_config' => ['preferred_model' => 'claude-opus-5'],
         'scaffold_pack_slugs' => ['crm', 'billing'],
     ]);
-    domainRow($tenant, 'acme.test');
+    // A label binding, built under the central domain. (This used to bind `acme.test` and expect it back as-is —
+    // the unverified dotted binding the 2026-10-19 security review showed a broker could plant.)
+    config(['app.url' => 'https://app.splicewire.test', 'tenancy.central_domains' => ['app.splicewire.test']]);
+    domainRow($tenant, 'acme');
     statusRow($tenant, 'queued', 'Queued', now()->subMinutes(2));
     statusRow($tenant, 'running', 'Provisioning schema', now()->subMinute());
 
@@ -339,7 +342,7 @@ it('projects the 8 owner-local props off the Tenant alone', function () {
         ->and($data->llmConfig)->toBe(['preferred_model' => 'claude-opus-5'])
         ->and($data->scaffoldPackSlugs)->toBe(['crm', 'billing'])
         ->and($data->statusChannel)->toBeString()
-        ->and($data->primaryHost)->toStartWith('acme.test')
+        ->and($data->primaryHost)->toBe('acme.app.splicewire.test')
         ->and($data->isBusy)->toBeTrue()
         ->and($data->isStalled)->toBeFalse();
 
@@ -348,6 +351,18 @@ it('projects the 8 owner-local props off the Tenant alone', function () {
         ->and($data->statuses[0]->state)->toBe('queued')
         ->and($data->statuses[1]->state)->toBe('running')
         ->and($data->statuses[1]->message)->toBe('Provisioning schema');
+});
+
+it('projects NO host for a tenant whose slug cannot stand in a URL authority, rather than a host that is not its own', function () {
+    // The reviewer's probe as a pre-grammar row: the slug, bound as the primary domain by CreateTenantDomain.
+    config(['app.url' => 'https://app.splicewire.test', 'tenancy.central_domains' => ['app.splicewire.test']]);
+    $tenant = makeTenant(['id' => 'brk-x@evil.example', 'name' => 'Probe', 'slug' => 'brk-x@evil.example']);
+    domainRow($tenant, 'brk-x@evil.example');
+
+    $data = TenantData::project(Tenant::with(['domains', 'statusEvents'])->find('brk-x@evil.example'));
+
+    expect($data->primaryHost)->toBeNull()
+        ->and($data->domains)->toBe(['brk-x@evil.example']);
 });
 
 it('costs zero queries per row once the includes are eager-loaded', function () {

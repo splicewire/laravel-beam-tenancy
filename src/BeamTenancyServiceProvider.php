@@ -49,6 +49,7 @@ use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledTenantMarkersAudit;
+use Splicewire\Beam\Tenancy\Doctor\TenantHostAudit;
 use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
 use Splicewire\Beam\Tenancy\Http\Middleware\InitializeTenancyBySoleTenant;
 use Splicewire\Beam\Tenancy\Listeners\MachineIdentityAwareUpdateSyncedResource;
@@ -775,6 +776,13 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 MachineIdentityOnMembershipPivotAudit::class,
+            );
+
+            // ADVISORY, read-only: tenants whose slug or bindings predate the slug grammar, and any no safe Tenant
+            // Host can be built for. Which rows a host holds is host data, so it warns and never gates.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                TenantHostAudit::class,
             );
 
             // GATES (pooled-storage ticket 06): a pooled tenant whose session-setting marker names

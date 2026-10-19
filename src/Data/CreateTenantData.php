@@ -3,8 +3,11 @@
 namespace Splicewire\Beam\Tenancy\Data;
 
 use Spatie\LaravelData\Attributes\Validation\In;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\Regex;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Tenancy\TenantSlug;
 use Splicewire\Beam\Tenancy\TenantStorage;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
@@ -43,6 +46,11 @@ use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 class CreateTenantData extends BeamData implements MapsToModelAttributes
 {
     public function __construct(
+        /**
+         * The slug grammar ({@see TenantSlug}): one lowercase DNS label. Attributes rather than `rules()` for the
+         * reason `storage` gives below; case and surrounding space are folded first ({@see prepareForPipeline()}).
+         */
+        #[Max(TenantSlug::MAX_LENGTH), Regex(TenantSlug::PATTERN)]
         public string $slug,
         public ?string $name = null,
         public ?string $ownerEmail = null,
@@ -59,6 +67,28 @@ class CreateTenantData extends BeamData implements MapsToModelAttributes
         #[In(TenantStorage::Pooled, TenantStorage::Schema)]
         public ?string $storage = null,
     ) {}
+
+    /**
+     * Fold the slug's case and surrounding whitespace before validation — the only rewriting a slug ever gets
+     * ({@see TenantSlug::normalize()}); anything else outside the grammar is refused, not repaired.
+     *
+     * @param  array<array-key, mixed>  $properties
+     * @return array<array-key, mixed>
+     */
+    public static function prepareForPipeline(array $properties): array
+    {
+        if (isset($properties['slug']) && is_string($properties['slug'])) {
+            $properties['slug'] = TenantSlug::normalize($properties['slug']);
+        }
+
+        return parent::prepareForPipeline($properties);
+    }
+
+    /** @return array<string, string> */
+    public static function messages(): array
+    {
+        return ['slug.max' => TenantSlug::RULE, 'slug.regex' => TenantSlug::RULE];
+    }
 
     /**
      * The declared write map (particle-doctrine: a class in an `editData:` slot declares it, never relies

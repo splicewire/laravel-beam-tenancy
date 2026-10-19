@@ -23,6 +23,11 @@ What it carries today:
 - **Ports** — DNS, edge, capability-overlay and domain-provision contracts, with null-object
   defaults; a sitemap base-URL resolver that returns the active tenant's domain; a doctor audit for
   the migration wiring.
+- **Slug grammar and the Tenant Host** — `TenantSlug` is the one declared grammar for a tenant slug
+  (one lowercase DNS label, ≤ 56); every door that accepts a slug validates against it. `TenantHost`
+  builds `Tenant::primaryHost()` from checked parts — the workspace hop sends the session token there,
+  so a host is never copied out of a stored string, and a custom domain counts only when its binding
+  is verified. `Doctor/TenantHostAudit` reports (never rewrites) rows that predate the grammar.
 - **The designated system tenant** — the original v1 surface, now one concern among many:
   `Concerns/DesignatedSystemTenant` resolves, stamps and seeds the single tenant carrying the
   configured system role.

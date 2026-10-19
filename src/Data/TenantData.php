@@ -146,7 +146,11 @@ class TenantData extends BeamData
         /** The channel the live ADR-0160 status push is subscribed on. */
         #[NotInList]
         public ?string $statusChannel = null,
-        /** The absolute host the tenant is reached at — folded from `domains`, never rebuilt by a caller. */
+        /**
+         * The absolute host the tenant is reached at — folded from `domains`, never rebuilt by a caller. Null when no
+         * safe host can be built for this row (a slug or binding that predates the slug grammar and cannot stand in a
+         * URL authority): there is then nowhere to open, and the operator UI must say so rather than link.
+         */
         #[NotInList]
         public ?string $primaryHost = null,
         /** @var list<StatusEventData> The raw timeline: History. */
@@ -187,7 +191,7 @@ class TenantData extends BeamData
             llmConfig: $tenant->llm_config ?? null,
             scaffoldPackSlugs: $tenant->scaffold_pack_slugs ?? [],
             statusChannel: $tenant->status_channel,
-            primaryHost: $tenant->primaryHost(),
+            primaryHost: $tenant->routableHost(),
             // Plain arrays, not `Lazy`. Tower's variant wrapped these two in `Lazy::create()`, and
             // nothing ever called `->include()` on them — so a Lazy prop here would be a field that
             // never reaches the wire. The declared `statusEvents` include is what makes materializing

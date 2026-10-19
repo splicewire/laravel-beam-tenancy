@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
@@ -958,24 +959,69 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     /**
      * The absolute, fully-qualified host a tenant is reached at — its Tenant Host
-     * (see CONTEXT.md). Resolved from the primary Tenant Domain: a subdomain label
-     * is expanded against the environment's central domain; a vanity binding (one
-     * that already contains a dot) is used as-is. This is the single authority for
-     * linking to a tenant — consumers receive it ready-made and never reconstruct
-     * it from request context.
+     * (see CONTEXT.md). This is the single authority for linking to a tenant —
+     * consumers receive it ready-made and never reconstruct it from request context.
+     *
+     * It is what the workspace hop sends the user's session token to, so it is BUILT
+     * ({@see TenantHost}), never copied out of a stored string, and it never throws:
+     * it is read inside projections of a member's whole workspace list, where one
+     * malformed legacy row must not fail the rest. A tenant with no safe host answers
+     * {@see TenantHost::UNROUTABLE}, which resolves nowhere; call {@see routableHost()}
+     * to tell that case apart.
      */
     public function primaryHost(): string
+    {
+        return $this->routableHost() ?? TenantHost::UNROUTABLE;
+    }
+
+    /**
+     * The Tenant Host, or null when none can be built safely. In order:
+     *
+     *  1. the primary binding, when it is a CUSTOM domain (it has a dot) that has been VERIFIED — the binding
+     *     carries a non-null `verified_at`. That stamp belongs to whatever proves the customer controls the name
+     *     (the ADR-0025 DNS port reporting Active for a vanity host). No install carries the column yet, so today
+     *     no custom domain is honoured anywhere; an unverified one is skipped, never linked.
+     *  2. the primary binding, when it is a single label, as `{label}.{central domain}`;
+     *  3. the slug, as `{slug}.{central domain}`.
+     *
+     * A dotted SLUG is never a custom domain. That was the defect this replaces: `CreateTenantDomain` binds the
+     * slug itself, and this method used any binding containing a dot as-is — so a broker-chosen slug
+     * `brk-x.evil.example` linked to that host, and `brk-x@evil.example` to `evil.example`.
+     */
+    public function routableHost(): ?string
     {
         $binding = $this->domains->firstWhere('is_primary', true)
             ?? $this->domains->first();
 
-        $label = $binding?->domain ?? $this->slug;
+        $declared = $binding === null ? '' : (string) $binding->domain;
 
-        if (str_contains($label, '.')) {
-            return $label;
+        if (str_contains($declared, '.')) {
+            if ($this->domainIsVerified($binding) && ($custom = TenantHost::customDomain($declared)) !== null) {
+                return $custom;
+            }
+
+            $declared = '';
         }
 
-        return $label.'.'.$this->centralDomain();
+        $central = $this->centralDomain();
+
+        foreach ([$declared, (string) $this->slug] as $label) {
+            if ($label !== '' && ($host = TenantHost::subdomain($label, $central)) !== null) {
+                return $host;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether a binding carries a verification stamp. Read off the raw attributes, so an install whose `domains`
+     * table has no `verified_at` column (all of them, today) answers "unverified" rather than tripping a
+     * missing-attribute guard.
+     */
+    public function domainIsVerified(Model $binding): bool
+    {
+        return ($binding->getAttributes()['verified_at'] ?? null) !== null;
     }
 
     /**
