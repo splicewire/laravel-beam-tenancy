@@ -49,7 +49,7 @@ class TenantHostAudit implements DoctorAudit
         }
 
         if ($defects === []) {
-            return [Finding::pass(self::CHECK, "{$checked} tenant(s): every slug and binding is one lowercase DNS label, and every Tenant Host is built from them.")];
+            return [Finding::pass(self::CHECK, "{$checked} tenant(s): every slug is one lowercase DNS label, every binding is one too or a verified custom domain, and every Tenant Host is built from them.")];
         }
 
         $rows = [];
