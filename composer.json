@@ -31,14 +31,15 @@
         "rushing/laravel-schema-convergence": "dev-main"
     },
     "require-dev": {
+        "laravel/pint": "^1.0",
+        "nikic/php-parser": "^5.8",
         "orchestra/testbench": "^9.0|^10.0|^11.0",
         "pestphp/pest": "^4.0",
-        "laravel/pint": "^1.0",
-        "stancl/virtualcolumn": "^1.0",
-        "wikimedia/composer-merge-plugin": "^2.1",
+        "rushing/laravel-auth-vault": "*",
+        "rushing/laravel-saloon-kernel": "*",
         "rushing/php-graphine": "dev-main",
-        "nikic/php-parser": "^5.8",
-        "rushing/laravel-auth-vault": "*"
+        "stancl/virtualcolumn": "^1.0",
+        "wikimedia/composer-merge-plugin": "^2.1"
     },
     "autoload": {
         "psr-4": {
@@ -59,6 +60,7 @@
             "dev-main": "1.0.x-dev"
         },
         "merge-plugin": {
+            "merge-dev": true,
             "include": [
                 "composer.local.json"
             ]
@@ -98,158 +100,32 @@
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "../../rushing/laravel-postgres-rls",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/codegen.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/laravel-data-nav",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-auth-vault.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/codegen",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-data-filters.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/laravel-data-filters",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-data-nav.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/laravel-data-schemas-scribe",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-doctor.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/laravel-doctor",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-permission-cascade.git"
         },
         {
-            "type": "path",
-            "url": "../../rushing/laravel-permission-cascade",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-pipeline-registry",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-popcorn",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-schema-convergence",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-versioning",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/php-graphine",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/php-popcorn",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../schemastud/laravel-data-schemas",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../schemastud/laravel-frame",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../schemastud/laravel-json-ns",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../schemastud/php-json-ns",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../laravel-beam",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../laravel-beam-accounts",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../laravel-beam-provision",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../laravel-beam-sitemap",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../laravel-beam-workflows",
-            "options": {
-                "symlink": true
-            }
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-pipeline-registry.git"
         },
         {
             "type": "git",
@@ -257,11 +133,43 @@
         },
         {
             "type": "git",
+            "url": "https://github.com/stephenr85/laravel-postgres-rls.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-saloon-kernel.git"
+        },
+        {
+            "type": "git",
             "url": "https://github.com/stephenr85/laravel-schema-convergence.git"
         },
         {
             "type": "git",
+            "url": "https://github.com/stephenr85/laravel-versioning.git"
+        },
+        {
+            "type": "git",
             "url": "https://github.com/stephenr85/php-graphine.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/php-popcorn.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-data-schemas.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-frame.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-json-ns.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/php-json-ns.git"
         },
         {
             "type": "git",
@@ -286,20 +194,6 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-workflows.git"
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-saloon-kernel",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/laravel-auth-vault",
-            "options": {
-                "symlink": true
-            }
         }
     ],
     "suggest": {
