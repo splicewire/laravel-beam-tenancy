@@ -11,9 +11,10 @@ Because it owns the domain→tenant mapping, this package also binds the
 **multi-domain sitemap base-URL resolver** (ADR-0166 §3): it `require`s
 `laravel-beam-sitemap` for the `SitemapBaseUrlResolver` port and re-binds it to
 `TenantSitemapBaseUrlResolver`, which returns the active tenant's domain
-(`Tenant::primaryHost()`) when a tenant context is initialized, and falls back to
-beam-sitemap's `config('app.url')` default when tenancy is absent. Cross-tenant
-sitemap aggregation is deferred to tower (ADR-0166 §5), not built here.
+(`Tenant::routableHost()`: built from the slug grammar and verified custom domains, never copied
+out of a stored string) when a tenant context is initialized, and falls back to
+beam-sitemap's `config('app.url')` default when tenancy is absent or the tenant has no safe
+host. Cross-tenant sitemap aggregation is deferred to tower (ADR-0166 §5), not built here.
 
 **Pooled** — the third of a tenant's three storage states (`Tenant::storage()`: Pooled / Schema /
 Isolated Database): many tenants in one shared `pool_<name>` schema, rows kept apart by Postgres
