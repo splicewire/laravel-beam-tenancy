@@ -177,10 +177,6 @@
         },
         {
             "type": "git",
-            "url": "https://github.com/stephenr85/laravel-auth-vault.git"
-        },
-        {
-            "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-accounts.git"
         },
         {
