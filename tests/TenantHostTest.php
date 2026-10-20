@@ -112,6 +112,41 @@ it('honours a custom domain only once its binding carries a verification stamp',
     expect($tenant->primaryHost())->toBe('shop.example.com');
 });
 
+it('counts only a real timestamp as a verification stamp, not whatever is merely not null', function (mixed $stamp) {
+    $tenant = hostTenant('acme', [['domain' => 'shop.example.com', 'is_primary' => true, 'verified_at' => $stamp]]);
+
+    expect($tenant->domainIsVerified($tenant->domains->first()))->toBeFalse()
+        ->and($tenant->primaryHost())->toBe('acme.app.splicewire.test');
+})->with([
+    'an empty string' => [''],
+    'whitespace' => ['  '],
+    'zero' => [0],
+    'the string zero' => ['0'],
+    'false' => [false],
+    'true' => [true],
+    'a flag word' => ['yes'],
+    'a relative date that strtotime would read as now' => ['now'],
+    'an empty array' => [[]],
+    'MySQL\'s zero date' => ['0000-00-00 00:00:00'],
+    'a date that is not on the calendar' => ['2026-02-30 10:00:00'],
+    'a timestamp with something after it' => ['2026-10-19 12:00:00; verified'],
+]);
+
+it('counts a timestamp however the driver spells it', function (mixed $stamp) {
+    $tenant = hostTenant('acme', [['domain' => 'shop.example.com', 'is_primary' => true, 'verified_at' => $stamp]]);
+
+    expect($tenant->domainIsVerified($tenant->domains->first()))->toBeTrue()
+        ->and($tenant->primaryHost())->toBe('shop.example.com');
+})->with([
+    'a timestamp column' => ['2026-10-19 12:00:00'],
+    'with fractional seconds' => ['2026-10-19 12:00:00.123456'],
+    'a timestamptz column' => ['2026-10-19 12:00:00+00'],
+    'with an offset' => ['2026-10-19 12:00:00+05:30'],
+    'ISO 8601' => ['2026-10-19T12:00:00+00:00'],
+    'ISO 8601, zulu' => ['2026-10-19T12:00:00Z'],
+    'a Carbon instance' => [fn () => now()],
+]);
+
 it('does not honour a verified binding that is not a host name', function () {
     $tenant = hostTenant('acme', [['domain' => 'x@evil.example', 'is_primary' => true, 'verified_at' => now()]]);
 

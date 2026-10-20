@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Tenancy;
 
+use DateTimeInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -60,6 +61,12 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 {
     use DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatusChannel, HasStatuses;
+
+    /**
+     * A timestamp as a database hands one back — `2026-10-19 12:00:00`, optionally with fractional seconds and an
+     * offset, or ISO 8601's `T` form — captured so {@see domainIsVerified()} can check the date is on the calendar.
+     */
+    private const VERIFIED_AT = '/^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})[ T](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/D';
 
     public $incrementing = false;
 
@@ -978,7 +985,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * The Tenant Host, or null when none can be built safely. In order:
      *
      *  1. the primary binding, when it is a CUSTOM domain (it has a dot) that has been VERIFIED — the binding
-     *     carries a non-null `verified_at`. That stamp belongs to whatever proves the customer controls the name
+     *     carries a `verified_at` that is a real timestamp ({@see domainIsVerified()}). That stamp belongs to whatever proves the customer controls the name
      *     (the ADR-0025 DNS port reporting Active for a vanity host). No install carries the column yet, so today
      *     no custom domain is honoured anywhere; an unverified one is skipped, never linked.
      *  2. the primary binding, when it is a single label, as `{label}.{central domain}`;
@@ -1015,13 +1022,27 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
-     * Whether a binding carries a verification stamp. Read off the raw attributes, so an install whose `domains`
-     * table has no `verified_at` column (all of them, today) answers "unverified" rather than tripping a
-     * missing-attribute guard.
+     * Whether a binding carries a verification stamp — a REAL moment, not merely a value that is not null. Read off
+     * the raw attributes, so an install whose `domains` table has no `verified_at` column (all of them, today)
+     * answers "unverified" rather than tripping a missing-attribute guard.
+     *
+     * Accepted: a {@see DateTimeInterface}, or a timestamp as a database hands one back (`2026-10-19 12:00:00`, with
+     * optional fractional seconds and an offset, or the ISO 8601 `T` form) that is a date on the calendar. Everything
+     * else is unverified — `''`, `0`, `'0'`, `false`, `'yes'`, `'now'` (which `strtotime` would read as a moment),
+     * MySQL's `0000-00-00 00:00:00` — because this answer decides whether a customer-supplied name is linked, and the
+     * session token travels to it. A truthy-looking placeholder must not be able to stand in for proof.
      */
     public function domainIsVerified(Model $binding): bool
     {
-        return ($binding->getAttributes()['verified_at'] ?? null) !== null;
+        $stamp = $binding->getAttributes()['verified_at'] ?? null;
+
+        if ($stamp instanceof DateTimeInterface) {
+            return true;
+        }
+
+        return is_string($stamp)
+            && preg_match(self::VERIFIED_AT, $stamp, $moment) === 1
+            && checkdate((int) $moment['month'], (int) $moment['day'], (int) $moment['year']);
     }
 
     /**
