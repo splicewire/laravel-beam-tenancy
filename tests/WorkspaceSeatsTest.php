@@ -113,3 +113,22 @@ it('seats a member provisioned through assignMember, not only the central pivot'
     expect($this->tenant->hasMember($user))->toBeTrue()
         ->and(rolesOf($user))->toBe(['User']);
 });
+
+// Found by the starter fresh-install walk (2026-10-21): the demo seeder seats members during beam:install, before the
+// tenant's permission seeder has created any role, and assigning a role that does not exist threw mid-install.
+it('seats a member whose tier role does not exist yet without throwing, and gives it the role once provisioning creates it', function () {
+    Role::query()->where('name', 'User')->delete();
+    $user = seatUser('early@example.test');
+
+    // This harness shares one users table between central and the mirror, so the mirror already exists: the point is
+    // that seating neither throws nor assigns a role the tenant does not hold yet.
+    expect($this->seats->plan($this->tenant, $user, 'member'))->toBe([])
+        ->and($this->seats->seat($this->tenant, $user, 'member'))->toBeFalse()
+        ->and(rolesOf($user))->toBe([]);
+
+    Role::findOrCreate('User', 'web');
+
+    expect($this->seats->plan($this->tenant, $user, 'member'))->toBe(['+User'])
+        ->and($this->seats->seat($this->tenant, $user, 'member'))->toBeTrue()
+        ->and(rolesOf($user))->toBe(['User']);
+});

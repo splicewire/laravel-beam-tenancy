@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy\Seats;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
+use Spatie\Permission\Guard;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\Tenant;
 
@@ -65,9 +66,15 @@ class WorkspaceSeats
         $mirror = TenantUser::query()->find($user->getKey());
         $changes = $mirror === null ? ['mirror'] : [];
 
+        // A tier role the tenant does not hold yet (the demo seeder seats during beam:install, before the host's permission
+        // seeder has created any role) is not assigned: the mirror is still written, and the role follows on the next seat
+        // or `reseat` once provisioning has created it.
+        $roleModel = config('permission.models.role');
+        $exists = $roleModel::query()->where('name', $role)->where('guard_name', Guard::getDefaultName(TenantUser::class))->exists();
+
         foreach (array_unique(array_values($roles)) as $tierRole) {
             $holds = $mirror !== null && $mirror->hasRole($tierRole);
-            if ($tierRole === $role && ! $holds) {
+            if ($tierRole === $role && ! $holds && $exists) {
                 $changes[] = '+'.$tierRole;
             } elseif ($tierRole !== $role && $holds) {
                 $changes[] = '-'.$tierRole;
