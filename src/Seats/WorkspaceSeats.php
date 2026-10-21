@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Tenancy\Seats;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\Tenant;
 
@@ -55,7 +56,9 @@ class WorkspaceSeats
         $roles = self::tierRoles();
         $role = $roles[$tier] ?? null;
 
-        if ($role === null) {
+        // A tenant whose schema carries no role tables yet (provisioning not finished, or a host without spatie's
+        // tenant tables) has nothing to seat into.
+        if ($role === null || ! Schema::hasTable((string) config('permission.table_names.roles', 'roles'))) {
             return [];
         }
 

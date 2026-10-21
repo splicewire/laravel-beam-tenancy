@@ -60,7 +60,9 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  */
 class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 {
-    use DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatusChannel, HasStatuses;
+    use DesignatedSystemTenant, HasDatabase, HasDomains, HasMembers, HasStatusChannel, HasStatuses {
+        HasMembers::assignMember as assignMemberPivot;
+    }
 
     /**
      * A timestamp as a database hands one back — `2026-10-19 12:00:00`, optionally with fractional seconds and an
@@ -1169,6 +1171,20 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     // supplies members()/hasMember()/memberRole()/assignMember()/removeMember() in
     // terms of the relation + pivot columns named below; teamKey() and invitations()
     // are the tenant-specific bits. Provisioning + Syncable stay the app's private seam.
+
+    /**
+     * Seat a member: the central pivot at `$role` (HasMembers), then the tenant half, the mirror and exactly that tier's
+     * role ({@see Seats\WorkspaceSeats}, launch row qitem-20261021011058-9fa6ba0e). Provisioning paths (the demo seeder,
+     * a host's own) used to write only the pivot, which left the member with no tenant role.
+     */
+    public function assignMember(Authenticatable $user, Role $role): void
+    {
+        $this->assignMemberPivot($user, $role);
+
+        if ($user instanceof Model) {
+            app(Seats\WorkspaceSeats::class)->seat($this, $user, $role->value);
+        }
+    }
 
     /** Point HasMembers at the `users` belongsToMany (not the default `members`). */
     protected function membersRelation(): string

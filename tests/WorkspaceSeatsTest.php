@@ -104,3 +104,12 @@ it('reseats every live seat, lists without writing on --dry-run, and changes not
     expect(Artisan::call('splicewire:beam:tenancy:reseat'))->toBe(0)
         ->and(Artisan::output())->toContain('Changed 0 seat(s)');
 });
+
+it('seats a member provisioned through assignMember, not only the central pivot', function () {
+    $user = seatUser('provisioned@example.test');
+
+    $this->tenant->assignMember($user, Splicewire\Beam\Accounts\Enums\Role::Member);
+
+    expect($this->tenant->hasMember($user))->toBeTrue()
+        ->and(rolesOf($user))->toBe(['User']);
+});
