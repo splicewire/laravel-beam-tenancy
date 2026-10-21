@@ -25,6 +25,17 @@ return [
     'bind_tenant_model' => env('BEAM_TENANCY_BIND_TENANT_MODEL', true),
 
     /*
+     * The tenant role each workspace membership tier holds (Seats\WorkspaceSeats): seating a member, on invitation
+     * acceptance or a tier change, gives their tenant mirror exactly this role and removes the other mapped ones. A tier
+     * not named here (`service`, machine identities) is never touched. Defaults to the flagship's map.
+     */
+    'seat_roles' => [
+        'owner' => 'Admin',
+        'admin' => 'Admin',
+        'member' => 'User',
+    ],
+
+    /*
      * End tenancy when a web request terminates, so the next request in the same process starts in
      * central context.
      *

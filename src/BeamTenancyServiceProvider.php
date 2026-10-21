@@ -38,6 +38,7 @@ use Splicewire\Beam\Tenancy\Commands\PoolsDirectAccess;
 use Splicewire\Beam\Tenancy\Commands\PoolsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\Commands\PoolsRole;
+use Splicewire\Beam\Tenancy\Commands\ReseatWorkspaceMembers;
 use Splicewire\Beam\Tenancy\Contracts\TenantDnsProvider;
 use Splicewire\Beam\Tenancy\Contracts\TenantEdgeProvider;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
@@ -57,6 +58,7 @@ use Splicewire\Beam\Tenancy\Loopback\TenancyContextBridge;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
 use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
+use Splicewire\Beam\Tenancy\Seats\SeatAcceptedInvitations;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Support\StanclTenancyContext;
 use Splicewire\Beam\Tenancy\Support\TenancyConnections;
@@ -611,6 +613,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             ->hasCommand(PoolsDirectAccess::class)
             // pooled-storage ticket 13: move a tenant between pools, on the same server or another.
             ->hasCommand(PoolsMove::class)
+            // Workspace seats (launch row qitem-20261021011058-9fa6ba0e): the one-off backfill for existing seats.
+            ->hasCommand(ReseatWorkspaceMembers::class)
             // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
             // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
             // and package-tools' generateMigrationName timestamps them in listed order.
@@ -678,6 +682,9 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     public function packageBooted(): void
     {
         $this->bindTenantModel();
+
+        // Whoever accepts a workspace invitation is seated: the tenant mirror and their tier's role (WorkspaceSeats).
+        \Splicewire\Beam\Accounts\Models\Invitation::observe(SeatAcceptedInvitations::class);
         $this->bootStanclEventMap();
         $this->bootPermissionCacheScoping();
         $this->bootHostRouting();

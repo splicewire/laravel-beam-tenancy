@@ -10,6 +10,7 @@ use Splicewire\Beam\Accounts\Data\RoleOptionsData;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Http\Controller;
 use Splicewire\Beam\Tenancy\Data\TenantMemberRoleInputData;
+use Splicewire\Beam\Tenancy\Seats\WorkspaceSeats;
 
 class TenantMemberController extends Controller
 {
@@ -96,6 +97,9 @@ class TenantMemberController extends Controller
         // Re-read so the data slot carries the member's post-update state.
         $member = $tenant->users()->wherePivotNull('removed_at')->find($id);
         abort_unless($member !== null, 404);
+
+        // The tier change also moves the member's tenant role (WorkspaceSeats); the pivot alone left it behind.
+        app(WorkspaceSeats::class)->seat($tenant, $member, $input->role);
 
         return response()->json([
             'message' => 'Role updated.',
