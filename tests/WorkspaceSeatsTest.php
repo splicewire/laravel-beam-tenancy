@@ -116,19 +116,26 @@ it('seats a member provisioned through assignMember, not only the central pivot'
 
 // Found by the starter fresh-install walk (2026-10-21): the demo seeder seats members during beam:install, before the
 // tenant's permission seeder has created any role, and assigning a role that does not exist threw mid-install.
-it('seats a member whose tier role does not exist yet without throwing, and gives it the role once provisioning creates it', function () {
+it('seats a member whose tier role does not exist yet without throwing, and reseat gives it the role once provisioning creates it', function () {
     Role::query()->where('name', 'User')->delete();
     $user = seatUser('early@example.test');
 
-    // This harness shares one users table between central and the mirror, so the mirror already exists: the point is
-    // that seating neither throws nor assigns a role the tenant does not hold yet.
-    expect($this->seats->plan($this->tenant, $user, 'member'))->toBe([])
-        ->and($this->seats->seat($this->tenant, $user, 'member'))->toBeFalse()
-        ->and(rolesOf($user))->toBe([]);
+    // Seated the provisioning way while the tenant holds no User role (the demo seeder during beam:install): no throw, no role.
+    $this->tenant->assignMember($user, Splicewire\Beam\Accounts\Enums\Role::Member);
+    expect(rolesOf($user))->toBe([])
+        ->and($this->seats->plan($this->tenant, $user, 'member'))->toBe([]);
 
+    // Provisioning creates the role; the documented recovery is the reseat command, and a second run changes nothing.
     Role::findOrCreate('User', 'web');
 
-    expect($this->seats->plan($this->tenant, $user, 'member'))->toBe(['+User'])
-        ->and($this->seats->seat($this->tenant, $user, 'member'))->toBeTrue()
+    expect(Artisan::call('splicewire:beam:tenancy:reseat', ['--dry-run' => true]))->toBe(0)
+        ->and(Artisan::output())->toContain('Would change 1 seat(s)')
+        ->and(rolesOf($user))->toBe([]);
+
+    expect(Artisan::call('splicewire:beam:tenancy:reseat'))->toBe(0)
+        ->and(Artisan::output())->toContain('Changed 1 seat(s)')
         ->and(rolesOf($user))->toBe(['User']);
+
+    expect(Artisan::call('splicewire:beam:tenancy:reseat'))->toBe(0)
+        ->and(Artisan::output())->toContain('Changed 0 seat(s)');
 });
