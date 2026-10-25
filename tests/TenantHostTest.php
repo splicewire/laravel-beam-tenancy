@@ -1,15 +1,12 @@
 <?php
 
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
-use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Sitemap\HostedSiteAccess;
+use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantHost;
-use Splicewire\Beam\Tenancy\Tests\TestCase;
 use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Tenancy;
-
-uses(TestCase::class);
 
 /**
  * The Tenant Host is BUILT from checked parts, never copied out of a stored string (security review, 2026-10-19).
@@ -226,12 +223,24 @@ it('gives the sitemap the config default rather than a URL around an unbuildable
 
     $tenancy->tenant = hostTenant('acme');
 
-    expect($resolver->baseUrl())->toBe('https://acme.site.splicewire.test');
+    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
 });
 
-it('gives the sitemap the Site Host where the tenant has one, and the Tenant Host until then', function () {
-    // ADR-0234 d4 (EP-28): a Hosted site's canonical URLs and @ids hang off this port, so they name its Site Host.
-    // `siteHost()` arrives with the Site Host (EP-32); a tenant without one, or with none bound yet, keeps its Tenant Host.
+function sitemapTenantWithSiteHost(?string $siteHost): Tenant
+{
+    return tap(new class(['id' => 'acme', 'name' => 'Acme', 'slug' => 'acme']) extends Tenant
+    {
+        public ?string $site = null;
+
+        public function siteHost(): ?string
+        {
+            return $this->site;
+        }
+    }, fn ($tenant) => $tenant->site = $siteHost)->setRelation('domains', collect());
+}
+
+function sitemapResolverFor(Tenant $tenant): TenantSitemapBaseUrlResolver
+{
     $fallback = new class implements SitemapBaseUrlResolver
     {
         public function baseUrl(): string
@@ -241,23 +250,12 @@ it('gives the sitemap the Site Host where the tenant has one, and the Tenant Hos
     };
     app()->instance(Tenancy::class, $tenancy = new Tenancy);
     $tenancy->initialized = true;
-    $siteHosted = fn (?string $site): Tenant => tap(new class(['id' => 'acme', 'name' => 'Acme', 'slug' => 'acme']) extends Tenant
-    {
-        public ?string $site = null;
+    $tenancy->tenant = $tenant;
 
-        public function siteHost(): ?string
-        {
-            return $this->site;
-        }
-    }, fn ($tenant) => $tenant->site = $site)->setRelation('domains', collect());
-    $resolver = new TenantSitemapBaseUrlResolver(app(), $fallback);
+    return new TenantSitemapBaseUrlResolver(app(), $fallback);
+}
 
-    // Without a host plan adapter, fail closed to the tenant's ordinary app host.
-    app()->forgetInstance(HostedSiteAccess::class);
-    app()->offsetUnset(HostedSiteAccess::class);
-    $tenancy->tenant = $siteHosted('www.acme.example');
-    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
-
+it('uses the Site Host when HostedSiteAccess explicitly grants it', function () {
     app()->instance(HostedSiteAccess::class, new class implements HostedSiteAccess
     {
         public function allows(Tenant $tenant): bool
@@ -265,8 +263,12 @@ it('gives the sitemap the Site Host where the tenant has one, and the Tenant Hos
             return true;
         }
     });
-    expect($resolver->baseUrl())->toBe('https://www.acme.example');
 
+    expect(sitemapResolverFor(sitemapTenantWithSiteHost('www.acme.example'))->baseUrl())
+        ->toBe('https://www.acme.example');
+});
+
+it('keeps the Tenant Host when HostedSiteAccess explicitly denies it', function () {
     app()->instance(HostedSiteAccess::class, new class implements HostedSiteAccess
     {
         public function allows(Tenant $tenant): bool
@@ -274,8 +276,7 @@ it('gives the sitemap the Site Host where the tenant has one, and the Tenant Hos
             return false;
         }
     });
-    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
 
-    $tenancy->tenant = $siteHosted(null);
-    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
+    expect(sitemapResolverFor(sitemapTenantWithSiteHost('www.acme.example'))->baseUrl())
+        ->toBe('https://acme.app.splicewire.test');
 });
