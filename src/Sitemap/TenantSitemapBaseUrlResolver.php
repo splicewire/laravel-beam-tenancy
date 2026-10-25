@@ -41,8 +41,15 @@ class TenantSitemapBaseUrlResolver implements SitemapBaseUrlResolver
         // Host where one is bound. `siteHost()` arrives with the Site Host (EP-32); until then, and for a tenant without
         // one, the Tenant Host. Tenancy absent (single-tenant / central / retrofit), or a tenant no safe host can be built
         // for (its slug predates the slug grammar): the config-default, never a URL around an unchecked host.
-        $host = $tenant === null ? null
-            : ((method_exists($tenant, 'siteHost') ? $tenant->siteHost() : null) ?? $tenant->routableHost());
+        $siteHost = $tenant !== null && method_exists($tenant, 'siteHost') ? $tenant->siteHost() : null;
+        $host = $tenant === null ? null : $tenant->routableHost();
+
+        // Commerce sits above tenancy in the package graph, so the plan check is a host-bound port.
+        // An absent binding is not an implicit grant: Site Hosts are reserved for Hosted tenants.
+        if ($tenant !== null && $siteHost !== null && $this->container->bound(HostedSiteAccess::class)
+            && $this->container->make(HostedSiteAccess::class)->allows($tenant)) {
+            $host = $siteHost;
+        }
 
         if ($host === null) {
             return $this->fallback->baseUrl();

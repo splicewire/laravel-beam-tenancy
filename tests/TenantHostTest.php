@@ -2,6 +2,7 @@
 
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
+use Splicewire\Beam\Tenancy\Sitemap\HostedSiteAccess;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantHost;
 use Splicewire\Beam\Tenancy\Tests\TestCase;
@@ -251,8 +252,29 @@ it('gives the sitemap the Site Host where the tenant has one, and the Tenant Hos
     }, fn ($tenant) => $tenant->site = $site)->setRelation('domains', collect());
     $resolver = new TenantSitemapBaseUrlResolver(app(), $fallback);
 
+    // Without a host plan adapter, fail closed to the tenant's ordinary app host.
+    app()->forgetInstance(HostedSiteAccess::class);
+    app()->offsetUnset(HostedSiteAccess::class);
     $tenancy->tenant = $siteHosted('www.acme.example');
+    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
+
+    app()->instance(HostedSiteAccess::class, new class implements HostedSiteAccess
+    {
+        public function allows(Tenant $tenant): bool
+        {
+            return true;
+        }
+    });
     expect($resolver->baseUrl())->toBe('https://www.acme.example');
+
+    app()->instance(HostedSiteAccess::class, new class implements HostedSiteAccess
+    {
+        public function allows(Tenant $tenant): bool
+        {
+            return false;
+        }
+    });
+    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
 
     $tenancy->tenant = $siteHosted(null);
     expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
