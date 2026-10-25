@@ -30,7 +30,7 @@ it('adds app-default purpose and permits one primary domain per purpose', functi
     $migration->up();
 
     DB::table('domains')->insert([
-        ['domain' => 'acme.app.test', 'tenant_id' => 'acme', 'purpose' => 'app', 'is_primary' => true],
+        ['domain' => 'acme', 'tenant_id' => 'acme', 'purpose' => 'app', 'is_primary' => true],
         ['domain' => 'acme.site.test', 'tenant_id' => 'acme', 'purpose' => 'site', 'is_primary' => true],
         ['domain' => 'old.example', 'tenant_id' => 'acme', 'purpose' => 'app', 'is_primary' => false],
     ]);
@@ -70,14 +70,14 @@ it('publishes the same purpose invariant for a fresh domains table', function ()
 
     DB::table('tenants')->insert(['id' => 'acme']);
     DB::table('domains')->insert([
-        'domain' => 'acme.app.test', 'tenant_id' => 'acme', 'is_primary' => true,
+        'domain' => 'acme', 'tenant_id' => 'acme', 'is_primary' => true,
     ]);
     DB::table('domains')->insert([
         'domain' => 'acme.site.test', 'tenant_id' => 'acme', 'purpose' => 'site', 'is_primary' => true,
     ]);
 
     expect(DB::table('domains')->where('tenant_id', 'acme')->count())->toBe(2)
-        ->and(DB::table('domains')->where('domain', 'acme.app.test')->value('purpose'))->toBe('app');
+        ->and(DB::table('domains')->where('domain', 'acme')->value('purpose'))->toBe('app');
 
     expect(fn () => DB::table('domains')->insert([
         'domain' => 'duplicate.app.test', 'tenant_id' => 'acme', 'is_primary' => true,

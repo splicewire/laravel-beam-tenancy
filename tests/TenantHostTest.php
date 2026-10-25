@@ -96,11 +96,29 @@ it('builds a label binding into {label}.{central domain}', function () {
 it('keeps the Tenant Host and Site Host on separate purpose wildcards', function () {
     $tenant = hostTenant('acme', [
         ['domain' => 'acme', 'purpose' => 'app', 'is_primary' => true],
-        ['domain' => 'acme', 'purpose' => 'site', 'is_primary' => true],
+        ['domain' => 'pages.site.splicewire.test', 'purpose' => 'site', 'is_primary' => true],
+    ]);
+
+    expect($tenant->primaryHost())->toBe('acme.app.splicewire.test')
+        ->and($tenant->siteHost())->toBe('pages.site.splicewire.test');
+});
+
+it('accepts a stored full site wildcard host alongside the same app-domain label', function () {
+    $tenant = hostTenant('acme', [
+        ['domain' => 'acme', 'purpose' => 'app', 'is_primary' => true],
+        ['domain' => 'acme.site.splicewire.test', 'purpose' => 'site', 'is_primary' => true],
     ]);
 
     expect($tenant->primaryHost())->toBe('acme.app.splicewire.test')
         ->and($tenant->siteHost())->toBe('acme.site.splicewire.test');
+});
+
+it('does not treat an unknown full site host as a trusted wildcard binding', function () {
+    $tenant = hostTenant('acme', [
+        ['domain' => 'unrelated.example.com', 'purpose' => 'site', 'is_primary' => true],
+    ]);
+
+    expect($tenant->siteHost())->toBe('acme.site.splicewire.test');
 });
 
 it('uses the primary binding for the requested domain purpose', function () {

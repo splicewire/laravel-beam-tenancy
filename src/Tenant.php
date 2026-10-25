@@ -1015,6 +1015,23 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $declared = $binding === null ? '' : (string) $binding->domain;
 
         if (str_contains($declared, '.')) {
+            // Site bindings are stored as their complete wildcard host (for example
+            // acme.site.example.com), not as the app wildcard's tenant label. This keeps the
+            // globally-unique domains.domain key while allowing the same tenant label on both
+            // surfaces. Only the configured Site Host wildcard is trusted without a vanity
+            // domain verification stamp.
+            if ($purpose === TenantDomainPurpose::Site) {
+                $siteCentral = $this->siteCentralDomain();
+                $siteSuffix = '.'.$siteCentral;
+                $siteLabel = str_ends_with(strtolower($declared), $siteSuffix)
+                    ? substr($declared, 0, -strlen($siteSuffix))
+                    : '';
+
+                if (TenantHost::isLabel($siteLabel)) {
+                    return strtolower($declared);
+                }
+            }
+
             if ($this->domainIsVerified($binding) && ($custom = TenantHost::customDomain($declared)) !== null) {
                 return $custom;
             }
