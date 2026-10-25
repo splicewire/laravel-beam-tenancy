@@ -4,10 +4,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Tenancy\Tests\TestCase;
-
-uses(TestCase::class);
-
 beforeEach(function () {
     Schema::dropIfExists('domains');
     Schema::dropIfExists('tenants');
