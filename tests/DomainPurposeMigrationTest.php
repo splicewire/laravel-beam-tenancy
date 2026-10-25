@@ -45,6 +45,20 @@ it('adds app-default purpose and permits one primary domain per purpose', functi
     ]))->toThrow(QueryException::class);
 });
 
+it('refuses duplicate existing primary domains without changing their flags', function () {
+    DB::table('domains')->insert([
+        ['domain' => 'acme.app.test', 'tenant_id' => 'acme', 'is_primary' => true],
+        ['domain' => 'acme.other.test', 'tenant_id' => 'acme', 'is_primary' => true],
+    ]);
+
+    $migration = require __DIR__.'/../database/migrations/add_domain_purpose_to_domains_table.php.stub';
+
+    expect(fn () => $migration->up())
+        ->toThrow(RuntimeException::class, 'acme')
+        ->and(DB::table('domains')->where('is_primary', true)->count())->toBe(2)
+        ->and(Schema::hasIndex('domains', 'domains_tenant_primary_purpose_unique'))->toBeFalse();
+});
+
 it('publishes the same purpose invariant for a fresh domains table', function () {
     Schema::dropIfExists('domains');
     Schema::create('tenants', function (Blueprint $table) {

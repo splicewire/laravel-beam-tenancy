@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -12,6 +13,20 @@ return new class extends Migration
 {
     public function up(): void
     {
+        $duplicates = DB::table('domains')
+            ->select('tenant_id')
+            ->where('is_primary', true)
+            ->groupBy('tenant_id', ...(Schema::hasColumn('domains', 'purpose') ? ['purpose'] : []))
+            ->havingRaw('COUNT(*) > 1')
+            ->pluck('tenant_id')
+            ->all();
+
+        if ($duplicates !== []) {
+            throw new RuntimeException(
+                'Cannot enforce one primary domain per purpose; tenants have duplicate primary domains: '.implode(', ', $duplicates)
+            );
+        }
+
         if (! Schema::hasColumn('domains', 'purpose')) {
             Schema::table('domains', function (Blueprint $table) {
                 $table->string('purpose', 16)->default('app');
@@ -20,7 +35,14 @@ return new class extends Migration
 
         if (! Schema::hasColumn('domains', 'primary_purpose')) {
             Schema::table('domains', function (Blueprint $table) {
-                $table->string('primary_purpose')->nullable()->storedAs('CASE WHEN is_primary THEN purpose ELSE NULL END');
+                $column = $table->string('primary_purpose')->nullable();
+                $expression = 'CASE WHEN is_primary THEN purpose ELSE NULL END';
+
+                if (DB::connection()->getDriverName() === 'sqlite') {
+                    $column->virtualAs($expression);
+                } else {
+                    $column->storedAs($expression);
+                }
             });
         }
 
