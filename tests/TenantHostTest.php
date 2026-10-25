@@ -182,3 +182,33 @@ it('gives the sitemap the config default rather than a URL around an unbuildable
 
     expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
 });
+
+it('gives the sitemap the Site Host where the tenant has one, and the Tenant Host until then', function () {
+    // ADR-0234 d4 (EP-28): a Hosted site's canonical URLs and @ids hang off this port, so they name its Site Host.
+    // `siteHost()` arrives with the Site Host (EP-32); a tenant without one, or with none bound yet, keeps its Tenant Host.
+    $fallback = new class implements SitemapBaseUrlResolver
+    {
+        public function baseUrl(): string
+        {
+            return 'https://app.splicewire.test';
+        }
+    };
+    app()->instance(Tenancy::class, $tenancy = new Tenancy);
+    $tenancy->initialized = true;
+    $siteHosted = fn (?string $site): Tenant => tap(new class(['id' => 'acme', 'name' => 'Acme', 'slug' => 'acme']) extends Tenant
+    {
+        public ?string $site = null;
+
+        public function siteHost(): ?string
+        {
+            return $this->site;
+        }
+    }, fn ($tenant) => $tenant->site = $site)->setRelation('domains', collect());
+    $resolver = new TenantSitemapBaseUrlResolver(app(), $fallback);
+
+    $tenancy->tenant = $siteHosted('www.acme.example');
+    expect($resolver->baseUrl())->toBe('https://www.acme.example');
+
+    $tenancy->tenant = $siteHosted(null);
+    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
+});

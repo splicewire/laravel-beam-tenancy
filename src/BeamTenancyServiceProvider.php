@@ -16,6 +16,7 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
+use Splicewire\Beam\Brand\BrandResolver;
 use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
@@ -31,6 +32,7 @@ use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
+use Splicewire\Beam\Tenancy\Brand\TenantBrandResolver;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrateFresh;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsRollback;
@@ -819,6 +821,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         }
 
         $this->bootSeed();
+
+        // beam-ux ADR-0234 d5: on a tenant's host the brand is the Hosted site's own. Decorates whatever the host binds,
+        // so an install's own resolver keeps answering everywhere else.
+        if (interface_exists(BrandResolver::class)) {
+            $this->app->extend(BrandResolver::class, fn (BrandResolver $resolver, $app) => new TenantBrandResolver($app->make(TenancyContext::class), $resolver));
+        }
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;

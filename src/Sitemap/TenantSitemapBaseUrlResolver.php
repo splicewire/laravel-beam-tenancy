@@ -15,7 +15,8 @@ use Stancl\Tenancy\Tenancy;
  * concern.
  *
  * When a tenant context is active (`tenancy()->initialized`), the base URL is the active
- * tenant's Tenant Host ({@see Tenant::primaryHost()}) with a scheme prefixed. When tenancy
+ * tenant's Site Host where one is bound, else its Tenant Host ({@see Tenant::primaryHost()}),
+ * with a scheme prefixed. When tenancy
  * is ABSENT — single-tenant / central / retrofit — it delegates to the beam-sitemap
  * config-default ({@see ConfigSitemapBaseUrlResolver},
  * `config('app.url')`), honoring ADR-0151's retrofit stance that the base must not require
@@ -36,9 +37,12 @@ class TenantSitemapBaseUrlResolver implements SitemapBaseUrlResolver
     {
         $tenant = $this->activeTenant();
 
-        // Tenancy absent (single-tenant / central / retrofit), or a tenant no safe host can be built for (its slug
-        // predates the slug grammar): the config-default, never a URL around an unchecked host.
-        $host = $tenant?->routableHost();
+        // beam-ux ADR-0234 d4 (EP-28): a Hosted site's canonical URLs and @ids hang off this port, so they name its Site
+        // Host where one is bound. `siteHost()` arrives with the Site Host (EP-32); until then, and for a tenant without
+        // one, the Tenant Host. Tenancy absent (single-tenant / central / retrofit), or a tenant no safe host can be built
+        // for (its slug predates the slug grammar): the config-default, never a URL around an unchecked host.
+        $host = $tenant === null ? null
+            : ((method_exists($tenant, 'siteHost') ? $tenant->siteHost() : null) ?? $tenant->routableHost());
 
         if ($host === null) {
             return $this->fallback->baseUrl();
