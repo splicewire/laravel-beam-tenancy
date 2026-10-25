@@ -30,10 +30,13 @@ class CreateDomainsTable extends Migration
                 $table->increments('id');
                 $table->string('domain', 255)->unique();
                 $table->string('tenant_id');
+                $table->string('purpose', 16)->default('app');
                 $table->boolean('is_primary')->default(false);
+                $table->string('primary_purpose')->nullable()->storedAs('CASE WHEN is_primary THEN purpose ELSE NULL END');
 
                 $table->timestamps();
                 $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
+                $table->unique(['tenant_id', 'primary_purpose'], 'domains_tenant_primary_purpose_unique');
             })
             ->assert();
     }

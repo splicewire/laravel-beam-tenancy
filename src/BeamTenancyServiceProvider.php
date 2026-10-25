@@ -623,6 +623,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             ->hasMigrations([
                 'create_tenants_table',
                 'create_domains_table',
+                'add_domain_purpose_to_domains_table',
                 'create_tenant_users_table',
                 // The MACHINE half of "who may enter this tenant" — listed after `create_tenants_table`
                 // and the central `users` substrate it FKs, exactly like `create_tenant_users_table`

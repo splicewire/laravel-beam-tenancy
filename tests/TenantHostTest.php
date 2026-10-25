@@ -4,8 +4,11 @@ use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantHost;
+use Splicewire\Beam\Tenancy\Tests\TestCase;
 use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Tenancy;
+
+uses(TestCase::class);
 
 /**
  * The Tenant Host is BUILT from checked parts, never copied out of a stored string (security review, 2026-10-19).
@@ -88,6 +91,30 @@ it('builds a label binding into {label}.{central domain}', function () {
 
     expect($tenant->primaryHost())->toBe('acme.app.splicewire.test')
         ->and(hopAuthority($tenant->primaryHost())['host'])->toBe('acme.app.splicewire.test');
+});
+
+it('keeps the Tenant Host and Site Host on separate purpose wildcards', function () {
+    $tenant = hostTenant('acme', [
+        ['domain' => 'acme', 'purpose' => 'app', 'is_primary' => true],
+        ['domain' => 'acme', 'purpose' => 'site', 'is_primary' => true],
+    ]);
+
+    expect($tenant->primaryHost())->toBe('acme.app.splicewire.test')
+        ->and($tenant->siteHost())->toBe('acme.site.splicewire.test');
+});
+
+it('uses the primary binding for the requested domain purpose', function () {
+    $tenant = hostTenant('acme', [
+        ['domain' => 'workspace.example.com', 'purpose' => 'app', 'is_primary' => true, 'verified_at' => now()],
+        ['domain' => 'pages.example.com', 'purpose' => 'site', 'is_primary' => true, 'verified_at' => now()],
+    ]);
+
+    expect($tenant->primaryHost())->toBe('workspace.example.com')
+        ->and($tenant->siteHost())->toBe('pages.example.com');
+});
+
+it('falls back to the tenant slug on the site wildcard when no site binding exists', function () {
+    expect(hostTenant('acme')->siteHost())->toBe('acme.site.splicewire.test');
 });
 
 it('picks the central domain the app URL lives under', function () {
@@ -180,7 +207,7 @@ it('gives the sitemap the config default rather than a URL around an unbuildable
 
     $tenancy->tenant = hostTenant('acme');
 
-    expect($resolver->baseUrl())->toBe('https://acme.app.splicewire.test');
+    expect($resolver->baseUrl())->toBe('https://acme.site.splicewire.test');
 });
 
 it('gives the sitemap the Site Host where the tenant has one, and the Tenant Host until then', function () {

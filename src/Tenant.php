@@ -980,7 +980,13 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      */
     public function primaryHost(): string
     {
-        return $this->routableHost() ?? TenantHost::UNROUTABLE;
+        return $this->routableHost(TenantDomainPurpose::App) ?? TenantHost::UNROUTABLE;
+    }
+
+    /** The Hosted site's public host, or null when no safe Site Host can be built. */
+    public function siteHost(): ?string
+    {
+        return $this->routableHost(TenantDomainPurpose::Site);
     }
 
     /**
@@ -997,10 +1003,14 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * slug itself, and this method used any binding containing a dot as-is — so a broker-chosen slug
      * `brk-x.evil.example` linked to that host, and `brk-x@evil.example` to `evil.example`.
      */
-    public function routableHost(): ?string
+    public function routableHost(TenantDomainPurpose $purpose = TenantDomainPurpose::App): ?string
     {
-        $binding = $this->domains->firstWhere('is_primary', true)
-            ?? $this->domains->first();
+        $forPurpose = $this->domains->filter(fn (Model $domain): bool =>
+            // Rows from before domain purposes were introduced are app domains.
+            (($domain->getAttributes()['purpose'] ?? TenantDomainPurpose::App->value) === $purpose->value)
+        );
+
+        $binding = $forPurpose->firstWhere('is_primary', true) ?? $forPurpose->first();
 
         $declared = $binding === null ? '' : (string) $binding->domain;
 
@@ -1012,7 +1022,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             $declared = '';
         }
 
-        $central = $this->centralDomain();
+        $central = $purpose === TenantDomainPurpose::Site ? $this->siteCentralDomain() : $this->centralDomain();
 
         foreach ([$declared, (string) $this->slug] as $label) {
             if ($label !== '' && ($host = TenantHost::subdomain($label, $central)) !== null) {
@@ -1021,6 +1031,15 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         }
 
         return null;
+    }
+
+    /** The Site Host's wildcard sibling to the app wildcard (`site.example.com`). */
+    protected function siteCentralDomain(): string
+    {
+        $appDomain = $this->centralDomain();
+        $root = str_starts_with($appDomain, 'app.') ? substr($appDomain, 4) : $appDomain;
+
+        return 'site.'.$root;
     }
 
     /**
