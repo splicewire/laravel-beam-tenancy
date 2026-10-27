@@ -399,27 +399,10 @@ class DemoTenantSeeder extends Seeder
         });
     }
 
-    /**
-     * Does the tenant's own schema hold the table a {@see TenantUser} lives in?
-     *
-     * Asked inside the tenant, of the CURRENT schema explicitly on Postgres: never by resolving the bare name through the
-     * session's `search_path`, which on a schema-per-tenant connection still reaches the central `public.users`.
-     */
+    /** Does the tenant's own schema hold the table a {@see TenantUser} lives in? See {@see TenantUser::tableInCurrentTenant()}. */
     protected function tenantHoldsUsers(Model $tenant): bool
     {
-        return (bool) $tenant->run(function (): bool {
-            $model = new TenantUser;
-            $connection = $model->getConnection();
-
-            if ($connection->getDriverName() !== 'pgsql') {
-                return $connection->getSchemaBuilder()->hasTable($model->getTable());
-            }
-
-            return $connection->selectOne(
-                'select 1 from information_schema.tables where table_schema = current_schema() and table_name = ?',
-                [$model->getTable()],
-            ) !== null;
-        });
+        return (bool) $tenant->run(fn (): bool => TenantUser::tableInCurrentTenant());
     }
 
     /**

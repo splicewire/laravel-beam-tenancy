@@ -14,6 +14,12 @@ class CentralUsersTenant extends Tenant
 {
     public static string $tenantConnection = 'tenant_without_users';
 
+    /** The membership pivot keys a Tenant, whatever this fixture subclass is called. */
+    public function getForeignKey(): string
+    {
+        return 'tenant_id';
+    }
+
     public function run(callable $callback)
     {
         $central = DB::getDefaultConnection();

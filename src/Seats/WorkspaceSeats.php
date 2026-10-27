@@ -63,6 +63,12 @@ class WorkspaceSeats
             return [];
         }
 
+        // A tenant of a host that owns `users` central-only holds no mirror table at all: its seats stay central, as
+        // DemoTenantSeeder keeps them (launch L1 replay, 2026-10-27: assignMember threw here on a fresh Commerce install).
+        if (! TenantUser::tableInCurrentTenant()) {
+            return [];
+        }
+
         $mirror = TenantUser::query()->find($user->getKey());
         $changes = $mirror === null ? ['mirror'] : [];
 
