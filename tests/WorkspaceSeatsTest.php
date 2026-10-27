@@ -114,6 +114,30 @@ it('seats a member provisioned through assignMember, not only the central pivot'
         ->and(rolesOf($user))->toBe(['User']);
 });
 
+// Found by the L1 final replay (2026-10-27): a Commerce-shaped host owns `users` central-only, so its tenant holds the
+// permission tables but no `users`. The demo seeder keeps such seats central (DemoTenantSeeder::tenantHoldsUsers), but
+// assignMember's seat still looked the mirror up in the tenant and the fresh Commerce install failed its seed.
+it('seats nothing in a tenant that holds no users table, and assignMember keeps the central pivot without throwing', function () {
+    config(['database.connections.tenant_without_users' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']]);
+    $central = Illuminate\Support\Facades\DB::getDefaultConnection();
+    Illuminate\Support\Facades\DB::setDefaultConnection('tenant_without_users');
+    try {
+        (include __DIR__.'/../vendor/spatie/laravel-permission/database/migrations/create_permission_tables.php.stub')->up();
+        Role::findOrCreate('User', 'web');
+    } finally {
+        Illuminate\Support\Facades\DB::setDefaultConnection($central);
+    }
+    $tenant = Splicewire\Beam\Tenancy\Tests\Fixtures\CentralUsersTenant::create(['id' => 'central_users', 'name' => 'Central Users']);
+    $user = seatUser('central-only@example.test');
+
+    expect($this->seats->plan($tenant, $user, 'member'))->toBe([])
+        ->and($this->seats->seat($tenant, $user, 'member'))->toBeFalse();
+
+    $tenant->assignMember($user, Splicewire\Beam\Accounts\Enums\Role::Member);
+
+    expect($tenant->hasMember($user))->toBeTrue();
+});
+
 // Found by the starter fresh-install walk (2026-10-21): the demo seeder seats members during beam:install, before the
 // tenant's permission seeder has created any role, and assigning a role that does not exist threw mid-install.
 it('seats a member whose tier role does not exist yet without throwing, and reseat gives it the role once provisioning creates it', function () {
