@@ -5,7 +5,6 @@ namespace Splicewire\Beam\Tenancy\Site;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
-use RuntimeException;
 
 /**
  * A Hosted site's **Site Settings** (analytics ADR-0237 d6, EP-33): its brand (a name, else the tenant's, and a logo) and
@@ -38,7 +37,7 @@ class SiteSettings extends Model
             // A tenant's search_path is '<tenant>,public': unmigrated, an unqualified write would land in the shared public
             // table every unmigrated tenant reads (d6). hasTable() asks the current schema only, so refuse until it has its own.
             if (! self::migratedHere($settings)) {
-                throw new RuntimeException('Site Settings are not migrated in this schema yet; run its migrations before saving them.');
+                throw new SiteSettingsNotMigrated('Site Settings are not migrated in this schema yet; run its migrations before saving them.');
             }
 
             $id = $settings->ga4_measurement_id;

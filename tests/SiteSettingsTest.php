@@ -261,7 +261,7 @@ it('reads and writes only the current schema\'s own table, never public\'s, on P
 
     $connect('tenant_ep33c,public');
     expect(SiteSettings::current())->toBeNull()
-        ->and(fn () => SiteSettings::put(['ga4_measurement_id' => 'G-TENANT1']))->toThrow(RuntimeException::class, 'not migrated');
+        ->and(fn () => SiteSettings::put(['ga4_measurement_id' => 'G-TENANT1']))->toThrow(Splicewire\Beam\Tenancy\Site\SiteSettingsNotMigrated::class, 'not migrated');
     expect(DB::table('public.site_settings')->count())->toBe(0);
 
     DB::statement('CREATE TABLE tenant_ep33c.site_settings (LIKE public.site_settings INCLUDING ALL)');
