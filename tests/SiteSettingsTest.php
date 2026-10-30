@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Splicewire\Beam\Analytics\Contracts\AnalyticsIdResolver;
 use Splicewire\Beam\Analytics\Providers\GaProvider;
 use Splicewire\Beam\Analytics\Providers\GtmProvider;
@@ -227,4 +228,49 @@ it('never renders the install\'s container on a Site Host, and renders the tenan
     requestOn('acme.site.splicewire.test');
     expect($head())->not->toContain('GTM-INSTALL')
         ->and($head())->toContain('G-ACME123');
+});
+
+// an-0237 d6 (orch-lead 13:30Z): a tenant's search_path is '<tenant>,public', so a host that has migrated central but not its
+// tenants has a public site_settings that an unqualified query would reach. Site Settings read and write the CURRENT schema's
+// own table only: until the tenant's is migrated they read nothing and refuse to save, and public is never written.
+it('reads and writes only the current schema\'s own table, never public\'s, on PostgreSQL', function () {
+    $database = getenv('EP33C_PGSQL_TEST_DATABASE');
+
+    if (! is_string($database) || ! preg_match('/^test_[a-z0-9_]{1,54}$/', $database)) {
+        test()->markTestSkipped('Set EP33C_PGSQL_TEST_DATABASE to an isolated test_* database.');
+    }
+
+    $connect = function (string $searchPath) use ($database): void {
+        config(['database.connections.pgsql' => [
+            'driver' => 'pgsql', 'host' => getenv('EP33C_PGSQL_HOST') ?: '127.0.0.1', 'port' => getenv('EP33C_PGSQL_PORT') ?: '5432',
+            'database' => $database, 'username' => getenv('EP33C_PGSQL_USERNAME') ?: 'postgres', 'password' => getenv('EP33C_PGSQL_PASSWORD') ?: '',
+            'charset' => 'utf8', 'prefix' => '', 'search_path' => $searchPath, 'sslmode' => 'prefer',
+        ]]);
+        DB::purge('pgsql');
+        DB::setDefaultConnection('pgsql');
+    };
+    $migration = require dirname(__DIR__).'/database/migrations/shared/create_site_settings_table.php.stub';
+
+    // The connection is guarded by the test_* name above; all DDL below is confined to it.
+    $connect('public');
+    expect(DB::connection()->getDatabaseName())->toBe($database);
+    DB::statement('DROP SCHEMA IF EXISTS tenant_ep33c CASCADE');
+    DB::statement('DROP TABLE IF EXISTS public.site_settings');
+    DB::statement('CREATE SCHEMA tenant_ep33c');
+    $migration->up();
+
+    $connect('tenant_ep33c,public');
+    expect(SiteSettings::current())->toBeNull()
+        ->and(fn () => SiteSettings::put(['ga4_measurement_id' => 'G-TENANT1']))->toThrow(RuntimeException::class, 'not migrated');
+    expect(DB::table('public.site_settings')->count())->toBe(0);
+
+    DB::statement('CREATE TABLE tenant_ep33c.site_settings (LIKE public.site_settings INCLUDING ALL)');
+    SiteSettings::put(['ga4_measurement_id' => 'G-TENANT1']);
+
+    expect(SiteSettings::current()?->ga4_measurement_id)->toBe('G-TENANT1')
+        ->and(DB::table('tenant_ep33c.site_settings')->count())->toBe(1)
+        ->and(DB::table('public.site_settings')->count())->toBe(0);
+
+    DB::statement('DROP SCHEMA tenant_ep33c CASCADE');
+    DB::statement('DROP TABLE public.site_settings');
 });
