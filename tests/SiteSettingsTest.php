@@ -102,6 +102,34 @@ beforeEach(function () {
     (require dirname(__DIR__).'/database/migrations/shared/create_site_settings_table.php.stub')->up();
 });
 
+// Landing order (orch-lead 13:29Z): the decorators bind the moment a host takes this package, before that host has run
+// its next migrate, so a schema with no site_settings table answers exactly as before Site Settings existed.
+it('answers as before Site Settings existed while the table is not yet migrated', function () {
+    Illuminate\Support\Facades\Schema::drop('site_settings');
+    activateTenant(siteTenant());
+    $install = new class implements BrandResolver
+    {
+        public function for(?Request $request = null): BrandData
+        {
+            return new BrandData(name: 'Splicewire', logo: '/install-logo.svg', titleTemplate: '%s · Splicewire', legalEntity: 'Splicewire',
+                passkeyCopy: 'Sign in to Splicewire', contact: [], home: '/', tagline: null);
+        }
+    };
+    $brand = (new TenantBrandResolver(app(TenancyContext::class), $install))->for();
+    $ids = new TenantAnalyticsIdResolver(app(), installIds());
+
+    expect(SiteSettings::current())->toBeNull()
+        ->and($brand->name)->toBe('Acme Inc')
+        ->and($brand->logo)->toBe('/install-logo.svg');
+
+    requestOn('acme.app.splicewire.test');
+    expect($ids->idFor('gtm'))->toBe('GTM-INSTALL');
+
+    requestOn('acme.site.splicewire.test');
+    expect($ids->idFor('ga4'))->toBeNull()
+        ->and($ids->idFor('gtm'))->toBeNull();
+});
+
 it('accepts a GA4 measurement id and refuses a container id or anything else', function () {
     expect(SiteSettings::isMeasurementId('G-ABC1234'))->toBeTrue();
     foreach (['GTM-ABC123', 'UA-12345-1', 'G-', 'g-abc1234', 'G-ABC 123', ''] as $id) {
