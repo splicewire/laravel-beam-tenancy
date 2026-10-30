@@ -10,6 +10,7 @@
         }
     ],
     "require": {
+        "splicewire/laravel-beam-analytics": "*",
         "php": "^8.2",
         "illuminate/contracts": "^11.0|^12.0|^13.0",
         "illuminate/database": "^11.0|^12.0|^13.0",
@@ -170,6 +171,10 @@
         {
             "type": "git",
             "url": "https://github.com/schemastud/php-json-ns.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam-analytics.git"
         },
         {
             "type": "git",

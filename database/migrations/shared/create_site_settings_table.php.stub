@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * A Hosted site's Site Settings (analytics ADR-0237 d6, EP-33): its brand (a name overriding the tenant's, and a logo)
+ * and its GA4 measurement id, held in the TENANT's schema. Shared by default, like the estate's other ubiquitous tables:
+ * the central schema carries an empty one, which nothing reads. One row per schema ({@see SiteSettings::put()}).
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        if (Schema::hasTable('site_settings')) {
+            return;
+        }
+
+        Schema::create('site_settings', function (Blueprint $table) {
+            $table->id();
+            $table->string('brand_name')->nullable();
+            $table->string('logo', 2048)->nullable();
+            $table->string('ga4_measurement_id', 32)->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('site_settings');
+    }
+};

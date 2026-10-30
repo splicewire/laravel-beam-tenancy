@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Splicewire\Beam\Brand\BrandData;
 use Splicewire\Beam\Brand\BrandResolver;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
+use Splicewire\Beam\Tenancy\Site\SiteSettings;
 use Splicewire\Beam\Tenancy\Tenant;
 
 /**
@@ -14,8 +15,8 @@ use Splicewire\Beam\Tenancy\Tenant;
  * base URL: the active tenant's name replaces the install's, and the title template, the social tags and the
  * Structured Data read it from here.
  *
- * The name only, for now. A Hosted site's logo is held in its Site Settings (analytics ADR-0237 d6, EP-33), which do
- * not exist yet, so until then the rest of the brand is the install's.
+ * Its Site Settings (analytics ADR-0237 d6, EP-33) supply the brand: their name, else the tenant's name, and their logo,
+ * else the install's. The rest of the brand stays the install's.
  */
 final class TenantBrandResolver implements BrandResolver
 {
@@ -25,15 +26,22 @@ final class TenantBrandResolver implements BrandResolver
     {
         $brand = $this->inner->for($request);
         $tenant = $this->tenancy->currentTenant();
-        $name = $tenant instanceof Tenant && is_string($tenant->name) ? trim($tenant->name) : '';
+        if (! $tenant instanceof Tenant) {
+            return $brand;
+        }
 
-        if ($name === '' || $name === $brand->name) {
+        $settings = SiteSettings::current();
+        $name = trim((string) ($settings?->brand_name ?: (is_string($tenant->name) ? $tenant->name : '')));
+        $name = $name === '' ? $brand->name : $name;
+        $logo = $settings?->logo ?: $brand->logo;
+
+        if ($name === $brand->name && $logo === $brand->logo) {
             return $brand;
         }
 
         return new BrandData(
             name: $name,
-            logo: $brand->logo,
+            logo: $logo,
             titleTemplate: $brand->titleTemplate,
             legalEntity: $brand->legalEntity,
             // The default copy names the brand; a declared one that doesn't is kept as written.

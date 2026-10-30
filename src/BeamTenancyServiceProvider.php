@@ -16,6 +16,7 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
+use Splicewire\Beam\Analytics\Contracts\AnalyticsIdResolver;
 use Splicewire\Beam\Brand\BrandResolver;
 use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
@@ -32,6 +33,7 @@ use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
+use Splicewire\Beam\Tenancy\Analytics\TenantAnalyticsIdResolver;
 use Splicewire\Beam\Tenancy\Brand\TenantBrandResolver;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrateFresh;
@@ -630,6 +632,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 // beside it. See the stub's own docblock for why it carries no `role` and no
                 // `accepted_at`, and why that absence is what keeps machines out of per-seat billing.
                 'create_tenant_machine_identities_table',
+                // A Hosted site's Site Settings (analytics ADR-0237 d6, EP-33): shared by default, read in the tenant schema.
+                'shared/create_site_settings_table',
             ]);
     }
 
@@ -828,6 +832,10 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         if (interface_exists(BrandResolver::class)) {
             $this->app->extend(BrandResolver::class, fn (BrandResolver $resolver, $app) => new TenantBrandResolver($app->make(TenancyContext::class), $resolver));
         }
+
+        // analytics ADR-0237 d4-d5 (EP-33): on a Site Host the tenant's own GA4 id, and never a container; elsewhere the
+        // install's resolver answers, as the sitemap base URL is rebound below.
+        $this->app->extend(AnalyticsIdResolver::class, fn (AnalyticsIdResolver $resolver, $app) => new TenantAnalyticsIdResolver($app, $resolver));
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;
