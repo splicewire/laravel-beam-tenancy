@@ -21,9 +21,17 @@ use InvalidArgumentException;
  */
 class SiteSettings extends Model
 {
+    /** The one row's key: the table's primary key is fixed, so a schema holds one row at most (the database enforces it). */
+    public const SINGLETON = 1;
+
     protected $table = 'site_settings';
 
+    public $incrementing = false;
+
     protected $fillable = ['brand_name', 'logo', 'ga4_measurement_id'];
+
+    /** @var array<string, mixed> */
+    protected $attributes = ['id' => self::SINGLETON];
 
     /** GA4's measurement id: `G-` then uppercase letters or digits. A `GTM-` container id is not one. */
     public static function isMeasurementId(string $id): bool
@@ -33,23 +41,27 @@ class SiteSettings extends Model
 
     protected static function booted(): void
     {
-        static::saving(function (self $settings): void {
-            // A tenant's search_path is '<tenant>,public': unmigrated, an unqualified write would land in the shared public
-            // table every unmigrated tenant reads (d6). hasTable() asks the current schema only, so refuse until it has its own.
-            if (! self::migratedHere($settings)) {
-                throw new SiteSettingsNotMigrated('Site Settings are not migrated in this schema yet; run its migrations before saving them.');
-            }
+        static::saving(fn (self $settings) => self::admit($settings));
+    }
 
-            $id = $settings->ga4_measurement_id;
-            if ($id !== null && $id !== '' && ! self::isMeasurementId($id)) {
-                throw new InvalidArgumentException(
-                    "[{$id}] is not a GA4 measurement id (G-…). A Hosted site measures with its own GA4 id; a container is refused."
-                );
-            }
-            if ($id === '') {
-                $settings->ga4_measurement_id = null;
-            }
-        });
+    /** The rules every write passes, through save() or put(). */
+    private static function admit(self $settings): void
+    {
+        // A tenant's search_path is '<tenant>,public': unmigrated, an unqualified write would land in the shared public
+        // table every unmigrated tenant reads (d6). hasTable() asks the current schema only, so refuse until it has its own.
+        if (! self::migratedHere($settings)) {
+            throw new SiteSettingsNotMigrated('Site Settings are not migrated in this schema yet; run its migrations before saving them.');
+        }
+
+        $id = $settings->ga4_measurement_id;
+        if ($id !== null && $id !== '' && ! self::isMeasurementId($id)) {
+            throw new InvalidArgumentException(
+                "[{$id}] is not a GA4 measurement id (G-…). A Hosted site measures with its own GA4 id; a container is refused."
+            );
+        }
+        if ($id === '') {
+            $settings->ga4_measurement_id = null;
+        }
     }
 
     /** This schema's Site Settings, or null when none are saved (or the table is absent, e.g. an unmigrated host). */
@@ -59,7 +71,7 @@ class SiteSettings extends Model
             return null;
         }
 
-        return self::query()->orderBy('id')->first();
+        return self::query()->find(self::SINGLETON);
     }
 
     /** Whether THIS schema holds the table: on PostgreSQL, hasTable() reads current_schema(), never the rest of the search_path. */
@@ -68,12 +80,23 @@ class SiteSettings extends Model
         return Schema::connection($model->getConnectionName())->hasTable($model->getTable());
     }
 
-    /** Save this schema's one row: the given attributes merge into the existing row, or create it. */
+    /**
+     * Save this schema's one row: the given attributes merge into the existing row, or create it. One atomic upsert on the
+     * fixed key, so two first saves at once still leave one row, the later one's values merged into it.
+     */
     public static function put(array $attributes): self
     {
-        $settings = self::current() ?? new self;
-        $settings->fill($attributes)->save();
+        $settings = (new self)->fill($attributes);
+        self::admit($settings);
+        // Only the columns given (as admit() normalized them), so the upsert merges rather than clearing the others.
+        $values = array_intersect_key($settings->getAttributes(), array_flip(array_intersect(array_keys($attributes), $settings->getFillable())));
 
-        return $settings;
+        if ($values === []) {
+            self::query()->insertOrIgnore(['id' => self::SINGLETON]);
+        } else {
+            self::query()->upsert([['id' => self::SINGLETON] + $values], ['id'], array_keys($values));
+        }
+
+        return self::query()->findOrFail(self::SINGLETON);
     }
 }

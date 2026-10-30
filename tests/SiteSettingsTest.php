@@ -148,6 +148,35 @@ it('holds one row per schema, the tenant\'s brand and measurement id', function 
         ->and(SiteSettings::current()?->ga4_measurement_id)->toBe('G-ACME123');
 });
 
+// build-qa 13:34Z: one row per schema must hold under concurrent first saves, not only sequential ones. The row's key is
+// fixed, so two racing inserts cannot both land (the database refuses the second), and put() is one atomic upsert that
+// merges into whatever row another save made first.
+it('keeps one row when two first saves race, and put merges into the row that won', function () {
+    $first = new SiteSettings(['brand_name' => 'Acme Studio']);
+    $second = new SiteSettings(['brand_name' => 'Acme Rival']);
+    $first->save();
+
+    expect(fn () => $second->save())->toThrow(Illuminate\Database\QueryException::class);
+
+    SiteSettings::put(['ga4_measurement_id' => 'G-ACME123']);
+
+    expect(SiteSettings::query()->count())->toBe(1)
+        ->and(SiteSettings::current()?->brand_name)->toBe('Acme Studio')
+        ->and(SiteSettings::current()?->ga4_measurement_id)->toBe('G-ACME123');
+});
+
+it('saves through put() in one statement, whether or not a row exists yet', function () {
+    DB::enableQueryLog();
+    SiteSettings::put(['brand_name' => 'Acme Studio']);
+    SiteSettings::put(['logo' => 'https://cdn.example/acme.svg']);
+    $writes = collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => preg_match('/^\s*(insert|update)/i', $sql))->values();
+    DB::disableQueryLog();
+
+    expect($writes)->toHaveCount(2)
+        ->and($writes->every(fn (string $sql) => str_contains(strtolower($sql), 'on conflict')))->toBeTrue()
+        ->and(SiteSettings::current()?->only(['brand_name', 'logo']))->toBe(['brand_name' => 'Acme Studio', 'logo' => 'https://cdn.example/acme.svg']);
+});
+
 it('gives the tenant\'s Site Settings brand to the BrandResolver port', function () {
     activateTenant(siteTenant());
     $install = new class implements BrandResolver

@@ -18,7 +18,8 @@ return new class extends Migration
         }
 
         Schema::create('site_settings', function (Blueprint $table) {
-            $table->id();
+            // One row per schema, enforced here: the key is fixed (SiteSettings::SINGLETON), so a second row cannot land.
+            $table->unsignedSmallInteger('id')->primary();
             $table->string('brand_name')->nullable();
             $table->string('logo', 2048)->nullable();
             $table->string('ga4_measurement_id', 32)->nullable();
