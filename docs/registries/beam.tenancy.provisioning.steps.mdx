@@ -1,0 +1,74 @@
+---
+title: Tenant provisioning pipelines
+segment: beam.tenancy.provisioning.steps
+nav_order: 100
+excerpt: Named, ordered lists of the jobs that run when a tenant is created, declared once for every caller.
+---
+
+# Tenant provisioning pipelines
+
+`beam.tenancy.provisioning.steps` holds the **provisioning pipelines**: named, ordered lists of the
+job classes that run when a tenant is created. Creating a domain, a database, running migrations,
+seeding permissions and syncing the owner all happen as steps in one list. Every caller that
+provisions reads the same list, so the queued path and a synchronous retry can't drift apart.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration by `splicewire:beam:docs:registries:scaffold`. Rerun the command; do not edit between these markers. */}
+
+- **Root:** `beam.tenancy.provisioning.steps`
+- **Entries:** `list<class-string>`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `100` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry`
+
+{/* registry-facts:end */}
+
+## Who fills it
+
+This package ships **no** pipeline. The steps are engine-tier jobs it can't see, so any default here
+would be a guess. The tier that owns the steps registers them. Tower registers its canonical pipeline
+under `default`:
+
+```php
+use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
+
+app(TenantProvisioningStepRegistry::class)->register('default', [
+    CreateTenantDomain::class,
+    DecideStorage::class,
+    CreateDatabase::class,
+    MigrateDatabase::class,
+    SeedPermissions::class,
+    // …
+]);
+```
+
+The entry must be a **list**. A bare class name or a keyed map is refused when you register it,
+because the order is the contract and only a list guarantees one.
+
+## Who reads it
+
+- This package's `TenantCreated` listener. When the event fires, it reads the pipeline named by
+  `beam.tenancy.provisioning.pipeline` (`default` unless set) and runs its steps as a queued job
+  pipeline. It reads at fire time, not at boot, so a registration or override made after boot still
+  takes effect. If no pipeline of that name is registered, the listener does nothing.
+- Tower's synchronous provisioning and retry, which run the same steps in-process.
+
+The registry holds membership and order only. How the steps are dispatched, queued or
+synchronous, stays with each caller. A pipeline name is always chosen in code, so `stepsFor()` on an
+unknown name throws rather than returning an empty pipeline.
+
+## Overriding a pipeline
+
+The duplicate policy is **supersede**: register a different list under `default` from a provider
+that boots later, and the next tenant created runs yours. To run a different named pipeline, set
+`BEAM_TENANCY_PROVISIONING_PIPELINE`. A host that wires its own stancl event map instead sets
+`beam.tenancy.wire_stancl_events` to false, so the steps aren't dispatched twice.
+
+## Going deeper
+
+The source is
+[`TenantProvisioningStepRegistry`](https://github.com/splicewire/laravel-beam-tenancy/blob/main/src/Provisioning/TenantProvisioningStepRegistry.php).
+Why this package owns the event map and reads the pipeline at fire time is recorded in
+[its decision record](https://github.com/splicewire/laravel-beam-tenancy/blob/main/docs/adr/0003-this-package-owns-the-stancl-event-map-and-resolves-the-pipeline-at-fire-time.md).
+The sibling registry is
+[`beam.tenancy.machine-identity.kinds`](beam.tenancy.machine-identity.kinds).

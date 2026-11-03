@@ -1,0 +1,82 @@
+---
+title: Machine identity kinds
+segment: beam.tenancy.machine-identity.kinds
+nav_order: 100
+excerpt: The open vocabulary of programs a tenant can grant access to, such as a sync daemon or a broker.
+---
+
+# Machine identity kinds
+
+`beam.tenancy.machine-identity.kinds` is the vocabulary of **machine identities**: the kinds of
+program a tenant can grant access to, such as a sync daemon, the platform's own system account or a
+reseller broker. A machine is not a team member. It is never invited and never billed as a seat, so
+its grants live in their own table, `tenant_machine_identities`, and each row's `kind` names an
+entry here.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration by `splicewire:beam:docs:registries:scaffold`. Rerun the command; do not edit between these markers. */}
+
+- **Root:** `beam.tenancy.machine-identity.kinds`
+- **Entries:** `Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `100` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry`
+
+{/* registry-facts:end */}
+
+## What ships, and who adds more
+
+The vocabulary is open, because the tiers that run machines are open:
+
+- this package registers `sync` and `system`;
+- tower registers `broker`;
+- a host declares its own in `config('beam.tenancy.machine_identity.kinds')`.
+
+Each entry is a `MachineIdentityKind` with a key, a label, an optional description and an
+`abilities` list. A package registers the object on its own, since the key is on it:
+
+```php
+use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKind;
+use Splicewire\Beam\Tenancy\MachineIdentity\MachineIdentityKindRegistry;
+
+app(MachineIdentityKindRegistry::class)->register(new MachineIdentityKind(
+    key: 'warehouse-feed',
+    label: 'Warehouse feed',
+    abilities: ['inventory.update'],
+    description: 'The nightly stock import from the warehouse system.',
+));
+```
+
+Under **supersede**, the last registration of a key wins. The host's config is applied when the
+registry is first built, right after this package's two kinds, so a host redefines `sync` or
+`system` by declaring the same key in config. A kind another package registers later from its own
+provider, such as tower's `broker`, is applied after config. To override one of those, register
+your own from a provider that boots after it.
+
+## Abilities have three states
+
+`abilities` distinguishes three answers, and they are not interchangeable:
+
+- `null`, the default, means **unmeasured**: nobody has established what this kind may do. It is not
+  a deny-all.
+- `[]` means **measured, needs nothing**. `system` is this: it never authenticates and exists only
+  as the owner of record for machine-written rows.
+- A non-empty list is the measured set of abilities. `sync` lists the ones its routes actually check.
+
+Check `hasMeasuredAbilities()` before treating the list as an answer. Don't list an ability nothing
+enforces.
+
+## Unknown kinds are data, not errors
+
+A kind always arrives from a database row that some other tier wrote, so `get()` returns `null` for a
+kind this host has never registered, rather than throwing. A strict read would make one host's new
+kind break every other host that reads the same table.
+
+## Going deeper
+
+The source is
+[`MachineIdentityKindRegistry`](https://github.com/splicewire/laravel-beam-tenancy/blob/main/src/MachineIdentity/MachineIdentityKindRegistry.php),
+and the entry shape is
+[`MachineIdentityKind`](https://github.com/splicewire/laravel-beam-tenancy/blob/main/src/MachineIdentity/MachineIdentityKind.php).
+The sibling registry is
+[`beam.tenancy.provisioning.steps`](beam.tenancy.provisioning.steps).
