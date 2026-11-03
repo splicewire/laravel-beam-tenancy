@@ -33,7 +33,8 @@ carries the **designated system tenant** resolver it started life as.
 - **Ports** — DNS, edge, capability-overlay and domain-provision contracts, each with a null-object
   default so a host binds only what it needs. A sitemap base-URL resolver returns the active
   tenant's domain, falling back to the configured default when tenancy is absent.
-- **Doctor** — an audit for the migration wiring.
+- **Doctor** — audits for the migration wiring, the membership pivot's machine identities, tenant hosts, pooled
+  tenant markers and pooled storage, and pooled storage in the frame.
 - **Request lifecycle** — `EndTenancyOnTerminate`, pushed onto the global HTTP middleware stack, ends
   tenancy when a request terminates. See below; it is a correctness requirement under Octane.
 
@@ -43,11 +44,12 @@ carries the **designated system tenant** resolver it started life as.
 composer require splicewire/laravel-beam-tenancy
 ```
 
-The service provider is auto-discovered. Publish the config and migrations:
+The service provider is auto-discovered. `php artisan splicewire:beam:install` publishes the config and
+migrations and migrates. To publish by hand:
 
 ```bash
-php artisan vendor:publish --tag=laravel-beam-tenancy-config
-php artisan vendor:publish --tag=laravel-beam-tenancy-migrations
+php artisan vendor:publish --tag=beam-tenancy-config
+php artisan vendor:publish --tag=beam-tenancy-migrations
 ```
 
 Config publishes to `config/beam/tenancy.php` and is reached at `config('beam.tenancy.*')` — beam
@@ -170,6 +172,28 @@ first act is exactly this `end()`, because `tearDown()` does not end tenancy eit
 
 Disable with `beam.tenancy.end_on_terminate => false` (env `BEAM_TENANCY_END_ON_TERMINATE`) only if the
 host manages the lifecycle itself. **A host running a persistent worker must not disable it.**
+
+## Registries
+
+This package declares two registries:
+
+- [`beam.tenancy.provisioning.steps`](docs/registries/beam.tenancy.provisioning.steps.mdx): named, ordered lists of
+  the jobs that run when a tenant is created.
+- [`beam.tenancy.machine-identity.kinds`](docs/registries/beam.tenancy.machine-identity.kinds.mdx): the programs a
+  tenant can grant access to, such as a sync daemon or a broker.
+
+It registers into registries `splicewire/laravel-beam` owns:
+
+- [`beam.install.steps`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.install.steps.mdx):
+  the install step that publishes the config and migrations, ahead of the packages whose tables depend on tenants.
+- [`beam.doctor.audits`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.doctor.audits.mdx):
+  the doctor audits listed above.
+- [`beam.seed.steps`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.seed.steps.mdx):
+  the demo-tenant seeder, which runs only while `beam.tenancy.demo.seed_tenant` is on.
+- [`beam.surgeon.scan-paths`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.surgeon.scan-paths.mdx):
+  the package's `src/Http` directory, so the surgeon audits scan its controllers.
+- [`beam.particle.resources`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.particle.resources.mdx):
+  the attributed resources under `src/Data`, among them `tenants`.
 
 ## Dependency direction
 
