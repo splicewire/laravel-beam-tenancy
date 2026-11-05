@@ -28,8 +28,8 @@ provisions reads the same list, so the queued path and a synchronous retry can't
 ## Who fills it
 
 This package ships **no** pipeline. The steps are engine-tier jobs it can't see, so any default here
-would be a guess. The tier that owns the steps registers them. Tower registers its canonical pipeline
-under `default`:
+would be a guess. The tier that owns the steps registers them.
+[Splicewire](https://splicewire.test/) registers its canonical pipeline under `default`:
 
 ```php
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
@@ -53,7 +53,7 @@ because the order is the contract and only a list guarantees one.
   `beam.tenancy.provisioning.pipeline` (`default` unless set) and runs its steps as a queued job
   pipeline. It reads at fire time, not at boot, so a registration or override made after boot still
   takes effect. If no pipeline of that name is registered, the listener does nothing.
-- Tower's synchronous provisioning and retry, which run the same steps in-process.
+- Splicewire's synchronous provisioning and retry, which run the same steps in-process.
 
 The registry holds membership and order only. How the steps are dispatched, queued or
 synchronous, stays with each caller. A pipeline name is always chosen in code, so `stepsFor()` on an
@@ -61,8 +61,9 @@ unknown name throws rather than returning an empty pipeline.
 
 ## Overriding a pipeline
 
-The duplicate policy is **supersede**: register a different list under `default` from a provider
-that boots later, and the next tenant created runs yours. To run a different named pipeline, set
+The [**duplicate-key policy**](/beam/docs/foundations/registries#key-policies) is
+**supersede**: register a different list under `default` from a provider that boots later, and the
+next tenant created runs yours. To run a different named pipeline, set
 `BEAM_TENANCY_PROVISIONING_PIPELINE`. A host that wires its own stancl event map instead sets
 `beam.tenancy.wire_stancl_events` to false, so the steps aren't dispatched twice.
 

@@ -31,7 +31,7 @@ entry here.
 The vocabulary is open, because the tiers that run machines are open:
 
 - this package registers `sync` and `system`;
-- tower registers `broker`;
+- [Splicewire](https://splicewire.test/) registers `broker`;
 - a host declares its own in `config('beam.tenancy.machine_identity.kinds')`.
 
 Each entry is a `MachineIdentityKind` with a key, a label, an optional description and an
@@ -49,11 +49,12 @@ app(MachineIdentityKindRegistry::class)->register(new MachineIdentityKind(
 ));
 ```
 
-Under **supersede**, the last registration of a key wins. The host's config is applied when the
+The [**duplicate-key policy**](/beam/docs/foundations/registries#key-policies) is
+**supersede**, so the last registration of a key wins. The host's config is applied when the
 registry is first built, right after this package's two kinds, so a host redefines `sync` or
 `system` by declaring the same key in config. A kind another package registers later from its own
-provider, such as tower's `broker`, is applied after config. To override one of those, register
-your own from a provider that boots after it.
+provider, such as Splicewire's `broker`, is applied after config. To override one of those, register your
+own from a provider that boots after it.
 
 ## Abilities have three states
 
