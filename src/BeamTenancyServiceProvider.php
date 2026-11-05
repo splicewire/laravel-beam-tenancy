@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Rushing\AuthVault\Contracts\VaultContextGuard;
 use Rushing\Popcorn\Laravel\Runner\NullRunner;
+use Rushing\Popcorn\Registries\Registrant;
 use Rushing\Popcorn\Registries\Registrars\ConfigRegistrar;
+use Rushing\Popcorn\Registries\ScopesRegistrant;
 use Rushing\SaloonKernel\Contracts\KernelContextBridge;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
@@ -99,6 +101,14 @@ use Stancl\Tenancy\Middleware;
  */
 class BeamTenancyServiceProvider extends PackageServiceProvider
 {
+    use ScopesRegistrant;
+
+    /** Every registry write in register()/boot() that names no `$by` records this package. */
+    protected function registrant(): string
+    {
+        return 'splicewire/laravel-beam-tenancy';
+    }
+
     /** The permission cache's intended scope: a tenant key, or null for central ({@see bootPermissionCacheScoping()}). */
     protected ?string $permissionCacheScope = null;
 
@@ -143,6 +153,11 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     }
 
     public function register(): void
+    {
+        Registrant::scoped('splicewire/laravel-beam-tenancy', $this->registerScoped(...));
+    }
+
+    private function registerScoped(): void
     {
         // pooled-storage ticket 05: stancl's `tenants:migrate` learns to skip pooled tenants. A
         // container EXTENSION rather than a second `commands()` registration, because Artisan keeps
