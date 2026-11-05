@@ -3,15 +3,15 @@
 namespace Splicewire\Beam\Tenancy\Tests\Doctor;
 
 use Splicewire\Beam\Doctor\Testing\AssertsStubMigrations;
-use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Tests\TestCase;
 
 /**
  * beam-tenancy's own operator check: its migrations must stay publish-only .stub files. Mirrors the
  * per-package `DeclaredTopologyTest` shape (`rushing/php-package-topology`'s `AssertsDeclaredTopology`) —
- * a thin test wrapping a shared engine, declaring only "which audit is mine."
+ * a thin test wrapping a shared engine, declaring only "which package is mine."
  */
-class BeamTenancyMigrationsAuditTest extends TestCase
+class BeamTenancyStubMigrationsTest extends TestCase
 {
     use AssertsStubMigrations;
 
@@ -20,8 +20,13 @@ class BeamTenancyMigrationsAuditTest extends TestCase
         $this->assertMigrationsArePublishOnlyStubs();
     }
 
-    protected function stubMigrationsAuditClass(): string
+    protected function stubMigrationsPackage(): ?string
     {
-        return BeamTenancyMigrationsAudit::class;
+        return 'splicewire/laravel-beam-tenancy';
+    }
+
+    protected function stubMigrationsProvider(): ?string
+    {
+        return BeamTenancyServiceProvider::class;
     }
 }

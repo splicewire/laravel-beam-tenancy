@@ -52,7 +52,6 @@ use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
-use Splicewire\Beam\Tenancy\Doctor\BeamTenancyMigrationsAudit;
 use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
@@ -804,9 +803,9 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // convention — self-registers the doctor/operator check on ITS OWN migrations, same as every
         // other beam-* package registers it on theirs.
         if ($this->app->bound(BeamDoctorManifest::class)) {
-            $this->app->make(BeamDoctorManifest::class)->register(
+            $this->app->make(BeamDoctorManifest::class)->stubMigrations(
                 'splicewire/laravel-beam-tenancy',
-                BeamTenancyMigrationsAudit::class,
+                self::class,
             );
 
             // ADVISORY by construction — the audit itself can only ever emit Pass or Warn, never
@@ -887,7 +886,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * the authoritative tenancy-substrate package, establishes that here.
      *
      * This is NOT a package auto-loading its own un-published migrations (the convention that stays
-     * forbidden — {@see BeamTenancyMigrationsAudit} still fails a package that does that). It is
+     * forbidden — the `stubMigrations()` check still fails a package that does that). It is
      * host-side glue over an ALREADY-published directory: registering a custom migrations path is
      * ordinary Laravel app wiring, no different from any app declaring a second `database/migrations/`
      * subdirectory. Laravel's own `migrate` does not recurse into subdirectories by default, so the
