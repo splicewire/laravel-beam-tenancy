@@ -28,6 +28,10 @@ What it carries today:
   builds `Tenant::primaryHost()` from checked parts — the workspace hop sends the session token there,
   so a host is never copied out of a stored string, and a custom domain counts only when its binding
   is verified. `Doctor/TenantHostAudit` reports (never rewrites) rows that predate the grammar.
+- **The reporting toggle** — `Synthetic/SyntheticReporting` answers whether `Tenant::reportable()`
+  leaves Synthetic Tenants out: a cache override, else `beam.tenancy.synthetic.exclude_from_reporting`.
+  Flipped by the `tenants/synthetic-reporting` op or `splicewire:beam:tenancy:synthetic-reporting`;
+  each flip is logged to the central activity trail. See the README's "Synthetic tenants in reporting".
 - **The designated system tenant** — the original v1 surface, now one concern among many:
   `Concerns/DesignatedSystemTenant` resolves, stamps and seeds the single tenant carrying the
   configured system role.

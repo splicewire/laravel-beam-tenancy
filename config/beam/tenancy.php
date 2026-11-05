@@ -50,6 +50,28 @@ return [
      */
     'end_on_terminate' => env('BEAM_TENANCY_END_ON_TERMINATE', true),
 
+    /*
+     * SYNTHETIC TENANTS IN REPORTING — the toggle `Tenant::reportable()` reads.
+     *
+     * A Synthetic Tenant (`Tenant::markSynthetic()`) is included everywhere by default, so a demo or pre-launch install
+     * reads like one with customers. Financial-truth reads go through `Tenant::reportable()`, which drops synthetic
+     * tenants only while `SyntheticReporting::excludes()` is true.
+     *
+     * `exclude_from_reporting` is the deploy-time answer. An operator can override it at runtime, with no redeploy,
+     * through the `tenants/synthetic-reporting` operation or `splicewire:beam:tenancy:synthetic-reporting`. The
+     * override lives in the cache, so it holds across requests and workers, and is logged to the central activity
+     * trail. Clearing the cache (`cache:clear`) clears the override and puts this default back.
+     *
+     * `cache_store` names the store the override lives in; null means the default store. Use a shared, persistent
+     * store: an `array` store forgets the override at the end of the request.
+     *
+     * The env name matches the flagship's older `config/synthetic.php`, so a host that already sets it keeps its value.
+     */
+    'synthetic' => [
+        'exclude_from_reporting' => (bool) env('SYNTHETIC_EXCLUDE_FROM_REPORTING', false),
+        'cache_store' => env('BEAM_TENANCY_SYNTHETIC_CACHE_STORE'),
+    ],
+
     'system_tenant' => [
         'slug' => env('SPLICEWIRE_SYSTEM_TENANT_SLUG', 'system'),
         'name' => 'System',

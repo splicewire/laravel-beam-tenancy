@@ -173,6 +173,36 @@ first act is exactly this `end()`, because `tearDown()` does not end tenancy eit
 Disable with `beam.tenancy.end_on_terminate => false` (env `BEAM_TENANCY_END_ON_TERMINATE`) only if the
 host manages the lifecycle itself. **A host running a persistent worker must not disable it.**
 
+## Synthetic tenants in reporting
+
+A Synthetic Tenant (`$tenant->markSynthetic()`) is a generated tenant, used to make a demo or pre-launch install
+read like one with customers. It is included everywhere by default. A read that reports financial truth uses
+`Tenant::query()->reportable()`, which leaves synthetic tenants out only while the reporting toggle says so:
+
+```php
+$payingTenants = Tenant::query()->reportable()->count();
+```
+
+`SyntheticReporting::excludes()` answers the toggle. It returns the operator's runtime override if one is set, and
+otherwise `beam.tenancy.synthetic.exclude_from_reporting` (env `SYNTHETIC_EXCLUDE_FROM_REPORTING`, default `false`).
+
+The override lives in the cache, so flipping it needs no redeploy. Every flip is written to the central activity
+trail under `log_name` `synthetic-reporting`, with the before and after states. Two doors set it:
+
+- **The `tenants/synthetic-reporting` operation** (`SetSyntheticReporting`), a subject-free write gated by
+  `os.operate`. The host mounts it, above the `tenants` resource's `{id}` routes:
+  `Particle::ops('tenants', 'tenants', [SetSyntheticReporting::class])`. The body is
+  `{"excludeFromReporting": true | false | null}`; `null` clears the override.
+- **The command** `splicewire:beam:tenancy:synthetic-reporting [--exclude | --include | --clear]`. With no option it
+  prints the current answer and where it came from.
+
+Two things to know about the override:
+
+- `cache:clear` clears it, and config answers again.
+- It must live in a shared, persistent store. `beam.tenancy.synthetic.cache_store` names one (null means the default
+  store). It is read through a named store, so it reads the same key inside and outside a tenant even though
+  stancl's cache bootstrapper tags tenant-context cache calls.
+
 ## Registries
 
 This package declares two registries:

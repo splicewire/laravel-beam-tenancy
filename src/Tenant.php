@@ -26,6 +26,7 @@ use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
 use Splicewire\Beam\Tenancy\Pools\PoolMigrator;
+use Splicewire\Beam\Tenancy\Synthetic\SyntheticReporting;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
 use Splicewire\Beam\Workflows\Facades\Status;
@@ -503,9 +504,9 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
-     * Exclude Synthetic Tenants. The reporting seam: financial-truth reads call
-     * this when config('synthetic.exclude_from_reporting') is on. Treats absent
-     * and false alike as non-synthetic.
+     * Exclude Synthetic Tenants, always. Treats absent and false alike as non-synthetic. A
+     * financial-truth read wants {@see scopeReportable()} instead, which applies this only while
+     * the reporting toggle says so.
      */
     public function scopeNotSynthetic(Builder $query): void
     {
@@ -513,6 +514,18 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             $query->whereNull('data->synthetic')
                 ->orWhere('data->synthetic', false);
         });
+    }
+
+    /**
+     * The tenants a financial-truth read counts: every tenant, minus Synthetic Tenants while
+     * {@see SyntheticReporting::excludes()} is true. The toggle is read when the query is BUILT,
+     * so a flip reaches the next query without a redeploy.
+     */
+    public function scopeReportable(Builder $query): void
+    {
+        if (app(SyntheticReporting::class)->excludes()) {
+            $this->scopeNotSynthetic($query);
+        }
     }
 
     /**
