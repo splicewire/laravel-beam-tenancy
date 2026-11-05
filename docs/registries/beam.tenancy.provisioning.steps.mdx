@@ -29,7 +29,7 @@ provisions reads the same list, so the queued path and a synchronous retry can't
 
 This package ships **no** pipeline. The steps are engine-tier jobs it can't see, so any default here
 would be a guess. The tier that owns the steps registers them.
-[Splicewire](https://splicewire.test/) registers its canonical pipeline under `default`:
+[Splicewire](https://splicewire.com/) registers its canonical pipeline under `default`:
 
 ```php
 use Splicewire\Beam\Tenancy\Provisioning\TenantProvisioningStepRegistry;
