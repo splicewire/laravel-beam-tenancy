@@ -116,6 +116,63 @@ class ProvisioningRunStrayTest extends TestCase
         $this->assertFalse($tenant->fresh()->isBusy());
     }
 
+    public function test_a_re_migration_of_a_failed_tenant_leaves_it_failed_and_not_busy(): void
+    {
+        // Codex K-18a: a failed tenant is not provisioning either. markProvisioning would mint a run, flip the
+        // status back to `provisioning` and leave it busy with no pipeline to finish it.
+        $tenant = Tenant::create(['id' => 'broken', 'name' => 'Broken', 'slug' => 'broken']);
+        $tenant->markProvisioning('provisioning_create_database', 'Creating database');
+        $tenant->markFailed('boom');
+        $run = $tenant->status_run_id;
+
+        event(new DatabaseMigrated($tenant));
+        event(new DatabaseCreated($tenant));
+
+        $fresh = $tenant->fresh();
+        $this->assertSame('failed', $fresh->provisioning_status);
+        $this->assertSame($run, $fresh->status_run_id);
+        $this->assertSame(2, $tenant->statusTimeline()->count());
+        $this->assertFalse($fresh->isBusy());
+    }
+
+    public function test_a_sub_part_terminal_does_not_end_the_run(): void
+    {
+        // Codex K-18a: ADR-0098 — a null ref is the whole run, a ref is a sub-part. A sub-part's `complete`
+        // followed by more work is a run still in flight, not a stray.
+        $tenant = Tenant::create(['id' => 'parts', 'name' => 'Parts', 'slug' => 'parts']);
+        $tenant->markProvisioning('a', 'Doing a');
+        $tenant->markActive();
+        $tenant->markProvisioning('move_a', 'Moving a');
+        Status::complete($tenant, 'Moved a', ref: 'move_a', runId: $tenant->status_run_id);
+        $tenant->markProvisioning('move_b', 'Moving b');
+
+        $this->assertTrue($tenant->fresh()->isBusy());
+        $this->assertTrue(Tenant::with('statusEvents')->find('parts')->isBusy());
+        $this->assertSame(
+            [['move_a', 'done'], ['move_b', 'running']],
+            array_map(fn ($step) => [$step->ref, $step->state], TenantData::project(Tenant::with(['domains', 'statusEvents'])->find('parts'))->steps),
+        );
+    }
+
+    public function test_work_after_a_buffered_terminal_still_opens_its_own_run(): void
+    {
+        // Codex K-18a: with activitylog buffering on, a terminal event sits in the buffer until the job ends, so
+        // the log cannot say the run closed. tower's MigrateTenantToIsolatedDatabase promotes a pooled tenant
+        // (whose markActive() closes the run) and then carries on, after a refresh(); the closed run is on the row.
+        $tenant = $this->provisioned('isolating');
+        config(['activitylog.buffer.enabled' => true]);
+
+        $tenant->markProvisioning('provision_isolated_database', 'Provisioning the isolated database destination');
+        $promotionRun = $tenant->status_run_id;
+        $tenant->markProvisioning('promote_create_schema', 'Creating schema');
+        $tenant->markActive();
+        $tenant->refresh();
+        $tenant->markProvisioning('migrate_schema', 'Running tenant migrations on the isolated database');
+
+        $this->assertNotSame($promotionRun, $tenant->status_run_id);
+        $this->assertSame(14, $tenant->statusTimeline()->count()); // the buffered rows are not in the log yet
+    }
+
     public function test_migrating_during_provisioning_still_records_the_step(): void
     {
         $tenant = Tenant::create(['id' => 'fresh', 'name' => 'Fresh', 'slug' => 'fresh']);

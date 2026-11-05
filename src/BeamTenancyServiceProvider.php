@@ -547,19 +547,21 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // THIS package's Tenant; a host that opted out of bindTenantModel keeps stancl's model and
         // simply records nothing.
         //
-        // Only while the tenant is not yet ACTIVE (owner-review-20261102 K-18a, research 18 D-18-a (a)).
+        // Only while the tenant is PROVISIONING — no status yet, pending or provisioning (owner-review-20261102
+        // K-18a, research 18 D-18-a (a)). Not active and not failed: on either, markProvisioning would open a
+        // run nothing closes (a failed tenant would even flip back to `provisioning` and read busy).
         // stancl's `tenants:migrate` fires DatabaseMigrated once per tenant on every run, and this
         // listener used to log another "Running migrations" into each active tenant's finished
         // provisioning run, which nothing closed — the operator page read "In progress" for months. A
         // re-migration is maintenance, not provisioning; maintenance that wants a timeline (a pool move,
         // an isolated-database migration) records its own steps and closes its own run.
         Event::listen(Events\DatabaseCreated::class, function (Events\DatabaseCreated $event): void {
-            if (method_exists($event->tenant, 'markProvisioning') && ! self::tenantIsActive($event->tenant)) {
+            if (method_exists($event->tenant, 'markProvisioning') && self::tenantIsProvisioning($event->tenant)) {
                 $event->tenant->markProvisioning('provisioning_create_database', 'Creating database');
             }
         });
         Event::listen(Events\DatabaseMigrated::class, function (Events\DatabaseMigrated $event): void {
-            if (method_exists($event->tenant, 'markProvisioning') && ! self::tenantIsActive($event->tenant)) {
+            if (method_exists($event->tenant, 'markProvisioning') && self::tenantIsProvisioning($event->tenant)) {
                 $event->tenant->markProvisioning('provisioning_migrate_database', 'Running migrations');
             }
         });
@@ -1036,9 +1038,13 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         }
     }
 
-    /** Whether a stancl event's tenant has finished provisioning (K-18a: its infra events are maintenance). */
-    private static function tenantIsActive(object $tenant): bool
+    /** Whether a stancl event's tenant is still being provisioned (K-18a: otherwise its infra events are maintenance). */
+    private static function tenantIsProvisioning(object $tenant): bool
     {
-        return ($tenant->provisioning_status ?? null) === TenantProvisioningStatus::Active->value;
+        return in_array($tenant->provisioning_status ?? null, [
+            null,
+            TenantProvisioningStatus::Pending->value,
+            TenantProvisioningStatus::Provisioning->value,
+        ], true);
     }
 }

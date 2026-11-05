@@ -38,6 +38,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 /**
  * @property string|null $provisioning_status One of TenantProvisioningStatus values (stored in data column)
  * @property string|null $status_run_id Current provisioning/pack-apply run id — groups one run's ADR-0098 Display status events (stored in data column)
+ * @property string|null $status_run_closed The run id the last terminal (markActive/markFailed, pack complete/failed) closed — equal to status_run_id once the current run has ended, so new work opens its own (stored in data column; K-18a)
  * @property string|null $owner_email Email of the tenant owner (stored in data column)
  * @property list<string>|null $scaffold_pack_slugs Scaffold packs to provision (stored in data column)
  * @property string|null $plan_slug Subscription plan slug (stored in data column)
@@ -124,7 +125,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             }
             $this->provisioning_status = TenantProvisioningStatus::Provisioning->value;
             $this->save();
-        } elseif ($this->status_run_id === null || $this->statusRunHasEnded($this->status_run_id, fromLoaded: false)) {
+        } elseif ($this->statusRunIsClosed()) {
             $this->beginStatusRun();
             $this->save();
         }
@@ -139,6 +140,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public function markActive(): void
     {
         $this->provisioning_status = TenantProvisioningStatus::Active->value;
+        $this->status_run_closed = $this->status_run_id;
         $this->save();
 
         Status::complete($this, 'Provisioning complete.', runId: $this->status_run_id);
@@ -150,6 +152,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     public function markFailed(string $reason): void
     {
         $this->provisioning_status = TenantProvisioningStatus::Failed->value;
+        $this->status_run_closed = $this->status_run_id;
         $this->save();
 
         Status::failed($this, $reason, runId: $this->status_run_id);
@@ -170,11 +173,17 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     public function markPackApplyComplete(string $slug): void
     {
+        $this->status_run_closed = $this->status_run_id;
+        $this->save();
+
         Status::complete($this, "Applied scaffold pack '{$slug}'", runId: $this->status_run_id);
     }
 
     public function markPackApplyFailed(string $reason): void
     {
+        $this->status_run_closed = $this->status_run_id;
+        $this->save();
+
         Status::failed($this, $reason, runId: $this->status_run_id);
     }
 
@@ -300,8 +309,29 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
-     * Whether a status run reached its whole-run terminal event (`complete` or `failed`). A per-step
-     * `skipped` does not end a run. Reads the loaded `statusEvents` relation when asked to and it is
+     * Whether the tenant's current run is closed, so new work must open its own. Answered from the row
+     * first: markActive()/markFailed() and the pack-apply terminals record the run they closed in
+     * `status_run_closed` as they save, which holds even when activitylog BUFFERS the terminal event
+     * until the job ends (a promotion's markActive() inside an isolated-database migration). A row
+     * written before that marker existed falls back to the log.
+     */
+    private function statusRunIsClosed(): bool
+    {
+        if ($this->status_run_id === null) {
+            return true;
+        }
+
+        if ($this->status_run_closed === $this->status_run_id) {
+            return true;
+        }
+
+        return $this->statusRunHasEnded($this->status_run_id, fromLoaded: false);
+    }
+
+    /**
+     * Whether a status run reached its whole-run terminal event: `complete` or `failed` with NO ref
+     * (ADR-0098: a null ref is the whole run, a ref is a sub-part). A sub-part's terminal and a per-step
+     * `skipped` do not end a run. Reads the loaded `statusEvents` relation when asked to and it is
      * loaded (a list read stays query-free); the write path asks the log itself, since a relation
      * loaded earlier on this instance may predate the events it just emitted.
      */
@@ -312,12 +342,15 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
         if ($fromLoaded && $this->relationLoaded('statusEvents')) {
             return $this->statusEvents->contains(
-                fn (CentralActivityLog $event) => ($event->properties[$key] ?? null) === $runId && in_array($event->event, $ends, true),
+                fn (CentralActivityLog $event) => ($event->properties[$key] ?? null) === $runId
+                    && ($event->properties['ref'] ?? null) === null
+                    && in_array($event->event, $ends, true),
             );
         }
 
         return $this->statusTimelineQuery()
             ->where("properties->{$key}", $runId)
+            ->whereNull('properties->ref')
             ->whereIn('event', $ends)
             ->exists();
     }
