@@ -109,6 +109,12 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * is readable outside any tenant boundary) and keep the coarse provisioning_status Control mirror
      * in the `provisioning` state (unless already terminal-active). Entering a fresh provisioning run
      * mints a run id so every event of the attempt groups together.
+     *
+     * An ACTIVE tenant keeps its status, and its steps (a pool move, a schema promotion, an isolated-
+     * database migration — work that closes with markActive()/markFailed()) open a run of their own
+     * once the current one has ended. They used to write into the finished provisioning run, which the
+     * read now treats as closed ({@see isBusy()}, `StatusStepData::fold`): a run is never written after
+     * its terminal event (owner-review-20261102 K-18a).
      */
     public function markProvisioning(string $step, ?string $reason = null): void
     {
@@ -117,6 +123,9 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
                 $this->beginStatusRun();
             }
             $this->provisioning_status = TenantProvisioningStatus::Provisioning->value;
+            $this->save();
+        } elseif ($this->status_run_id === null || $this->statusRunHasEnded($this->status_run_id, fromLoaded: false)) {
+            $this->beginStatusRun();
             $this->save();
         }
 
@@ -258,7 +267,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      *  - Provisioning lifecycle: queued-but-not-started (pending) or running (provisioning) — the 202
      *    create response lands here, so the UI knows to watch the feed.
      *  - Pack-apply on an already-active tenant: provisioning_status stays active, so fall through to
-     *    the Display timeline — busy unless the latest event's state is terminal. No timeline -> not busy.
+     *    the Display timeline — busy unless the latest event's state is terminal, or it was logged into a
+     *    run that had already ended (a stray; K-18a). No timeline -> not busy.
      */
     public function isBusy(): bool
     {
@@ -277,7 +287,44 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
         $state = State::tryFrom((string) $latest->event);
 
-        return $state !== null && ! $state->isTerminal();
+        if ($state === null || $state->isTerminal()) {
+            return false;
+        }
+
+        // A non-terminal event logged into a run that had already ended is a stray, not work in flight
+        // (owner-review-20261102 K-18a): before the fix every `tenants:migrate` wrote one into the tenant's
+        // finished provisioning run, and the rows stay. Nothing writes a run after its end any more.
+        $runId = $latest->properties[$this->statusRunIdKey()] ?? null;
+
+        return ! (is_string($runId) && $this->statusRunHasEnded($runId, fromLoaded: true));
+    }
+
+    /**
+     * Whether a status run reached its whole-run terminal event (`complete` or `failed`). A per-step
+     * `skipped` does not end a run. Reads the loaded `statusEvents` relation when asked to and it is
+     * loaded (a list read stays query-free); the write path asks the log itself, since a relation
+     * loaded earlier on this instance may predate the events it just emitted.
+     */
+    private function statusRunHasEnded(string $runId, bool $fromLoaded): bool
+    {
+        $key = $this->statusRunIdKey();
+        $ends = [State::Complete->value, State::Failed->value];
+
+        if ($fromLoaded && $this->relationLoaded('statusEvents')) {
+            return $this->statusEvents->contains(
+                fn (CentralActivityLog $event) => ($event->properties[$key] ?? null) === $runId && in_array($event->event, $ends, true),
+            );
+        }
+
+        return $this->statusTimelineQuery()
+            ->where("properties->{$key}", $runId)
+            ->whereIn('event', $ends)
+            ->exists();
+    }
+
+    private function statusRunIdKey(): string
+    {
+        return (string) config('beam.workflows.run_id_key', 'run_id');
     }
 
     /**

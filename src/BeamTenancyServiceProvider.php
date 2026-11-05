@@ -546,13 +546,20 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // Infra steps recorded in the provisioning timeline. Guarded: `markProvisioning` lives on
         // THIS package's Tenant; a host that opted out of bindTenantModel keeps stancl's model and
         // simply records nothing.
+        //
+        // Only while the tenant is not yet ACTIVE (owner-review-20261102 K-18a, research 18 D-18-a (a)).
+        // stancl's `tenants:migrate` fires DatabaseMigrated once per tenant on every run, and this
+        // listener used to log another "Running migrations" into each active tenant's finished
+        // provisioning run, which nothing closed — the operator page read "In progress" for months. A
+        // re-migration is maintenance, not provisioning; maintenance that wants a timeline (a pool move,
+        // an isolated-database migration) records its own steps and closes its own run.
         Event::listen(Events\DatabaseCreated::class, function (Events\DatabaseCreated $event): void {
-            if (method_exists($event->tenant, 'markProvisioning')) {
+            if (method_exists($event->tenant, 'markProvisioning') && ! self::tenantIsActive($event->tenant)) {
                 $event->tenant->markProvisioning('provisioning_create_database', 'Creating database');
             }
         });
         Event::listen(Events\DatabaseMigrated::class, function (Events\DatabaseMigrated $event): void {
-            if (method_exists($event->tenant, 'markProvisioning')) {
+            if (method_exists($event->tenant, 'markProvisioning') && ! self::tenantIsActive($event->tenant)) {
                 $event->tenant->markProvisioning('provisioning_migrate_database', 'Running migrations');
             }
         });
@@ -1027,5 +1034,11 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         if ($kernel instanceof HttpKernel) {
             $kernel->pushMiddleware(Http\Middleware\EndTenancyOnTerminate::class);
         }
+    }
+
+    /** Whether a stancl event's tenant has finished provisioning (K-18a: its infra events are maintenance). */
+    private static function tenantIsActive(object $tenant): bool
+    {
+        return ($tenant->provisioning_status ?? null) === TenantProvisioningStatus::Active->value;
     }
 }
