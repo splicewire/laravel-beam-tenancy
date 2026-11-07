@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "bf688adb179f320a53e9d09971e8d686",
+    "content-hash": "e17ef490cf204c59d68a50064f690dfe",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -4453,7 +4453,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/codegen",
-                "reference": "6554e23cc938de166b4e78f1f6be722780e6a0d1"
+                "reference": "db5c231aab866320a904378fbbec531331a28964"
             },
             "require": {
                 "php": "^8.3",
@@ -4462,6 +4462,7 @@
             "require-dev": {
                 "laravel/pint": "^1.0",
                 "pestphp/pest": "^3.0",
+                "rushing/php-package-topology": "dev-main",
                 "wikimedia/composer-merge-plugin": "^2.1"
             },
             "type": "library",
@@ -4528,7 +4529,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-data-filters",
-                "reference": "ce4500f95db4bdce679a9c374eb2668f0700523e"
+                "reference": "3b60114df4d127fe9e5ef1eab6790c5575d403d6"
             },
             "require": {
                 "illuminate/contracts": "^12.0|^13.0",
@@ -4596,7 +4597,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-data-nav",
-                "reference": "e245491915214dca4bdea3812627e5923d429314"
+                "reference": "07bb2b5793da82d5cf0d436457a929c22f34335f"
             },
             "require": {
                 "illuminate/contracts": "^12.0|^13.0",
@@ -4630,6 +4631,11 @@
                     "include": [
                         "composer.local.json"
                     ]
+                },
+                "typescript-transformer": {
+                    "directories": {
+                        "src": "NavTree and NavNode, shared with the frontend as Inertia props; no declaration names them"
+                    }
                 }
             },
             "autoload": {
@@ -4662,9 +4668,11 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-doctor",
-                "reference": "a9b6c41883408f0f84144e3eb9dd16198414d29e"
+                "reference": "f4954f00e23f29b04e4276974bc579922da8e7be"
             },
             "require": {
+                "illuminate/console": "^11.0|^12.0|^13.0",
+                "illuminate/filesystem": "^11.0|^12.0|^13.0",
                 "illuminate/support": "^11.0|^12.0|^13.0",
                 "php": "^8.2"
             },
@@ -4808,7 +4816,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-pipeline-registry",
-                "reference": "2c89876af4a1e418ac314bba2d1a9ee38fffd5ef"
+                "reference": "83b5717afc5c1aff23f3759f37d87d9124f8b059"
             },
             "require": {
                 "illuminate/console": "^11.0|^12.0|^13.0",
@@ -4886,7 +4894,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-popcorn",
-                "reference": "e249c6c87415114364e354c9cb0220c97253f5d4"
+                "reference": "37a67aa847d6e72e76f356814be39e2dfafb8b2b"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -4959,7 +4967,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/laravel-postgres-rls",
-                "reference": "74567d0edab0f7bf7ace4bd598af3861d41cfa59"
+                "reference": "b4e179d2c29921262c11d8e68d0375d605d26bf1"
             },
             "require": {
                 "illuminate/console": "^11.0|^12.0|^13.0",
@@ -4971,7 +4979,8 @@
             "require-dev": {
                 "laravel/pint": "^1.0",
                 "orchestra/testbench": "^9.0|^10.0|^11.0",
-                "phpunit/phpunit": "^11.0|^12.0"
+                "phpunit/phpunit": "^11.0|^12.0",
+                "rushing/php-package-topology": "dev-main"
             },
             "type": "library",
             "extra": {
@@ -5175,7 +5184,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/php-popcorn",
-                "reference": "26c7f7d67b01b7a706be93cba7da6a3a8b7829b8"
+                "reference": "afe9e8025dbf40a960dd998f3f969860537dace3"
             },
             "require": {
                 "php": "^8.3",
@@ -5184,7 +5193,8 @@
             "require-dev": {
                 "laravel/pint": "^1.0",
                 "pestphp/pest": "^3.0",
-                "phpstan/phpstan": "^2.2"
+                "phpstan/phpstan": "^2.2",
+                "rushing/php-package-topology": "dev-main"
             },
             "type": "library",
             "extra": {
@@ -5243,7 +5253,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../schemastud/laravel-data-schemas",
-                "reference": "d267bc21f38c4c70aa01929db9bdc2917e7f18e1"
+                "reference": "e821a2b50dff374ea7c9c69626adfbeedbbc5026"
             },
             "require": {
                 "galbar/jsonpath": "^3.0",
@@ -5303,6 +5313,9 @@
                 ],
                 "pint": [
                     "@php -d memory_limit=512M vendor/bin/pint"
+                ],
+                "docs:examples": [
+                    "@php tests/regenerate-data-examples.php"
                 ]
             },
             "license": [
@@ -5334,7 +5347,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../schemastud/laravel-frame",
-                "reference": "29d2350f597318d76cb49c9a4468ca68b8e8acf3"
+                "reference": "5599b5dc4bbf29ebf17d4319b4bd0eba09f049bf"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -5405,7 +5418,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../schemastud/laravel-json-ns",
-                "reference": "4031e2ce14ea8164ace0145156f9e7e02b1dc23b"
+                "reference": "012ace7afb1b990faaa56cf66670b6a07b3b6490"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -5420,6 +5433,7 @@
                 "laravel/pint": "^1.0",
                 "orchestra/testbench": "^10.0|^11.0",
                 "pestphp/pest": "^4.0",
+                "rushing/php-package-topology": "dev-main",
                 "schemastud/laravel-data-schemas": "*",
                 "wikimedia/composer-merge-plugin": "^2.1"
             },
@@ -5491,7 +5505,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../schemastud/php-json-ns",
-                "reference": "54568f9ac9843131a4a9b2c1b54899affe15433c"
+                "reference": "ef640eb95aa62874c5f1ba0edf198607c8975592"
             },
             "require": {
                 "opis/json-schema": "^2.3",
@@ -5501,6 +5515,7 @@
             "require-dev": {
                 "laravel/pint": "^1.0",
                 "pestphp/pest": "^4.0",
+                "rushing/php-package-topology": "dev-main",
                 "wikimedia/composer-merge-plugin": "^2.1"
             },
             "type": "library",
@@ -6673,7 +6688,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam",
-                "reference": "10229c36fb9d173030b51016dd78ffdf5908251a"
+                "reference": "5629693018c059368ffa3f2eb7f6d0a516a703f4"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -6702,13 +6717,18 @@
                 "spatie/typescript-transformer": "^3.0"
             },
             "require-dev": {
+                "larastan/larastan": "^3.9",
                 "laravel/pint": "^1.0",
                 "orchestra/testbench": "^9.0|^10.0|^11.0",
                 "pestphp/pest": "^4.0",
                 "phpunit/phpunit": "^11.0|^12.0",
                 "rushing/laravel-surgeon": "*",
                 "rushing/php-package-topology": "dev-main",
+                "spatie/laravel-typescript-transformer": "^3.3",
                 "wikimedia/composer-merge-plugin": "^2.1"
+            },
+            "suggest": {
+                "spatie/laravel-typescript-transformer": "to call `BeamTypeScriptTransformerExtension` from a host's TypeScriptTransformerServiceProvider"
             },
             "type": "library",
             "extra": {
@@ -6750,9 +6770,16 @@
                     ]
                 },
                 "merge-plugin": {
+                    "merge-dev": true,
                     "include": [
                         "composer.local.json"
                     ]
+                },
+                "typescript-transformer": {
+                    "directories": {
+                        "src/Data": "ResponseBody, the response envelope hosts return since api-surface-coherence 130; no particle declaration names it",
+                        "src/Brand": "BrandData, the install brand hosts share as the Inertia brand prop and runtime config; no particle declaration names it"
+                    }
                 }
             },
             "autoload": {
@@ -6772,8 +6799,20 @@
                 "pint": [
                     "@php -d memory_limit=512M vendor/bin/pint"
                 ],
+                "lint": [
+                    "pint --parallel"
+                ],
+                "lint:check": [
+                    "pint --parallel --test"
+                ],
+                "types:check": [
+                    "phpstan analyse --memory-limit=1G"
+                ],
                 "test": [
                     "@php vendor/bin/pest"
+                ],
+                "docs:examples": [
+                    "@php tests/regenerate-data-examples.php"
                 ]
             },
             "license": [
@@ -6791,7 +6830,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-accounts",
-                "reference": "8e7a4106af5110c21485d7e9a862f3fa0e6a1687"
+                "reference": "38c3bd9107d07386472ff11c64016950b7a09dcd"
             },
             "require": {
                 "firebase/php-jwt": "^6.0|^7.0",
@@ -6823,7 +6862,7 @@
             "suggest": {
                 "laravel/sanctum": "Install in a satellite to activate its own opt-in token 'api' guard seam alongside the engine's session/Fortify web guard.",
                 "laravel/socialite": "Install where Route::splicewireAccountsOAuth() mounts OAuth sign-in (purchase-walkthrough M10).",
-                "splicewire/laravel-beam-notifications": "Activates this package's `to_roles:` / `to_teams:` recipient kinds, which it registers into `beam.notifications.recipient_kinds` unconditionally — the entries are inert strings without the notify package and live with it, so nothing here probes whether it is installed."
+                "splicewire/laravel-beam-notifications": "Activates this package's `to_roles:` / `to_teams:` recipient kinds, which it registers into `beam.notifications.recipient-kinds` unconditionally — the entries are inert strings without the notify package and live with it, so nothing here probes whether it is installed."
             },
             "type": "library",
             "extra": {
@@ -6856,6 +6895,11 @@
                     "include": [
                         "composer.local.json"
                     ]
+                },
+                "typescript-transformer": {
+                    "directories": {
+                        "src/Data/Pages": "Inertia page props that host controllers render (ProfilePageData, SecurityPageData, …); no particle declaration names them"
+                    }
                 }
             },
             "autoload": {
@@ -6898,6 +6942,67 @@
                 "symlink": true,
                 "relative": true
             }
+        },
+        {
+            "name": "splicewire/laravel-beam-analytics",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/splicewire/laravel-beam-analytics.git",
+                "reference": "14cf808c70bd3eb411958fba3fe7bdbc3437ddcc"
+            },
+            "require": {
+                "illuminate/console": "^11.0|^12.0|^13.0",
+                "illuminate/contracts": "^11.0|^12.0|^13.0",
+                "illuminate/support": "^11.0|^12.0|^13.0",
+                "illuminate/view": "^11.0|^12.0|^13.0",
+                "php": "^8.2",
+                "rushing/laravel-doctor": "*",
+                "spatie/laravel-package-tools": "^1.16"
+            },
+            "require-dev": {
+                "laravel/pint": "^1.0",
+                "orchestra/testbench": "^9.0|^10.0|^11.0",
+                "phpunit/phpunit": "^11.0|^12.0",
+                "wikimedia/composer-merge-plugin": "^2.1"
+            },
+            "default-branch": true,
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Splicewire\\Beam\\Analytics\\BeamAnalyticsServiceProvider"
+                    ]
+                },
+                "merge-plugin": {
+                    "include": [
+                        "composer.local.json"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Splicewire\\Beam\\Analytics\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Splicewire\\Beam\\Analytics\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "pint": [
+                    "@php -d memory_limit=512M vendor/bin/pint"
+                ],
+                "test": [
+                    "@php vendor/bin/phpunit"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Provider-agnostic, opt-in, fail-closed frontend analytics for beam satellites. Two Blade directives (@beamAnalyticsHead / @beamAnalyticsBody) render the analytics markup for every configured-and-keyed provider at once and nothing when a provider is keyless, the env is disallowed, or a provider name is unknown. GTM ships as the first adapter; a `splicewire:beam:analytics:doctor` command verifies directive placement and env/config coherence. Never reads a service-account key.",
+            "time": "2026-10-30T12:58:05+00:00"
         },
         {
             "name": "splicewire/laravel-beam-provision",
@@ -6977,7 +7082,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-sitemap",
-                "reference": "8ed5aab72d0a5d8f7ee9c72b24f67968ca0b04f3"
+                "reference": "80d0112b578014f930414c98271f7c38090ab658"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -7062,7 +7167,7 @@
             "dist": {
                 "type": "path",
                 "url": "../laravel-beam-workflows",
-                "reference": "1ad7270f5d5d5689ab19e7f04cc44817a0d3fbb9"
+                "reference": "6812188744d95838a316bb8a37da7cb134006d6e"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -13754,7 +13859,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../rushing/php-graphine",
-                "reference": "5ea7f50a6b2ac12e042f1360e1442c9f3dd28804"
+                "reference": "288602195fc6572e7c21a39e0f33c7eb54436cdd"
             },
             "require": {
                 "php": "^8.3"
@@ -13762,7 +13867,8 @@
             "require-dev": {
                 "laravel/pint": "^1.0",
                 "nikic/php-parser": "^5.0",
-                "pestphp/pest": "^3.0"
+                "pestphp/pest": "^3.0",
+                "rushing/php-package-topology": "dev-main"
             },
             "suggest": {
                 "graphp/graph": "MIT — pure-PHP in-memory graph algorithms behind the reference driver (roles 1/2)",
