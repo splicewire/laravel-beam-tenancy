@@ -52,6 +52,7 @@ use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Destinations\CustomerSuppliedDatabaseDestination;
 use Splicewire\Beam\Tenancy\Destinations\GcpCloudSqlDestination;
 use Splicewire\Beam\Tenancy\Destinations\IsolatedDatabaseDestination;
+use Splicewire\Beam\Tenancy\Doctor\BeamTenancyRetiredMigrationAudit;
 use Splicewire\Beam\Tenancy\Doctor\MachineIdentityOnMembershipPivotAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageAudit;
 use Splicewire\Beam\Tenancy\Doctor\PooledStorageFrameAudit;
@@ -646,12 +647,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             // The reporting toggle's command-line twin of the `tenants/synthetic-reporting` operation.
             ->hasCommand(SyntheticReportingCommand::class)
             // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
-            // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
-            // and package-tools' generateMigrationName timestamps them in listed order.
+            // Declared order matters: `create_tenants_table` must sort ahead of what references it, and
+            // package-tools' generateMigrationName timestamps them in listed order. (migration-flatten 06 retired the
+            // `add_domain_purpose_to_domains_table` ALTER: see BeamTenancyRetiredMigrationAudit.)
             ->hasMigrations([
                 'create_tenants_table',
                 'create_domains_table',
-                'add_domain_purpose_to_domains_table',
                 'create_tenant_users_table',
                 // The MACHINE half of "who may enter this tenant" — listed after `create_tenants_table`
                 // and the central `users` substrate it FKs, exactly like `create_tenant_users_table`
@@ -816,6 +817,13 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-tenancy',
                 MachineIdentityOnMembershipPivotAudit::class,
+            );
+
+            // Published copies of migrations this package has RETIRED (migration-flatten 06). Advisory: see
+            // {@see BeamTenancyRetiredMigrationAudit}.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-tenancy',
+                BeamTenancyRetiredMigrationAudit::class,
             );
 
             // ADVISORY, read-only: tenants whose slug or bindings predate the slug grammar, and any no safe Tenant
