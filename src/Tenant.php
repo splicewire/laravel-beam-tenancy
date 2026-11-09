@@ -309,6 +309,50 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
+     * Admit ONE live operation on this tenant atomically (owner-review-20261102 ticket 01). The status feed
+     * models one operation at a time, and `isBusy()` then `mark…()` is check-then-act: two simultaneous
+     * requests could both read the tenant idle and both start.
+     *
+     * The admission takes a row lock on the tenant, re-reads it, and runs `$start` (the caller's
+     * `mark…Starting`/`markProvisioning` write) before the lock is released, so a second admission waits
+     * and then sees the first one's work. It is refused when, under the lock:
+     *  - the fresh row `isBusy()`; or
+     *  - the row's status run moved since THIS instance was read: another admission opened a run in
+     *    between. Checked on the row, not only the timeline, because activitylog may buffer the
+     *    `running` event past the commit.
+     *
+     * `$start` receives the locked, fresh model; this instance takes its attributes afterwards so the
+     * caller's response reads what was written. Returns false (nothing started) when refused.
+     *
+     * @param  \Closure(static): void  $start
+     */
+    public function admitOperation(\Closure $start): bool
+    {
+        $seenRun = $this->status_run_id;
+
+        $admitted = $this->getConnection()->transaction(function () use ($start, $seenRun): ?self {
+            /** @var static|null $locked */
+            $locked = $this->newQuery()->whereKey($this->getKey())->lockForUpdate()->first();
+
+            if ($locked === null || $locked->status_run_id !== $seenRun || $locked->isBusy()) {
+                return null;
+            }
+
+            $start($locked);
+
+            return $locked;
+        });
+
+        if ($admitted === null) {
+            return false;
+        }
+
+        $this->setRawAttributes($admitted->getAttributes(), true);
+
+        return true;
+    }
+
+    /**
      * Whether the tenant's current run is closed, so new work must open its own. Answered from the row
      * first: markActive()/markFailed() and the pack-apply terminals record the run they closed in
      * `status_run_closed` as they save, which holds even when activitylog BUFFERS the terminal event
