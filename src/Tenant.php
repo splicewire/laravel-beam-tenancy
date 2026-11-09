@@ -38,6 +38,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 /**
  * @property string|null $provisioning_status One of TenantProvisioningStatus values (stored in data column)
  * @property string|null $status_run_id Current provisioning/pack-apply run id — groups one run's ADR-0098 Display status events (stored in data column)
+ * @property string|null $status_run_admitted The run id {@see admitOperation()} last admitted: a durable reservation, open until a terminal sets `status_run_closed` to it (stored in data column; owner-review-20261102 ticket 01)
  * @property string|null $status_run_closed The run id the last terminal (markActive/markFailed, pack complete/failed) closed — equal to status_run_id once the current run has ended, so new work opens its own (stored in data column; K-18a)
  * @property string|null $owner_email Email of the tenant owner (stored in data column)
  * @property list<string>|null $scaffold_pack_slugs Scaffold packs to provision (stored in data column)
@@ -317,9 +318,12 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * `mark…Starting`/`markProvisioning` write) before the lock is released, so a second admission waits
      * and then sees the first one's work. It is refused when, under the lock:
      *  - the fresh row `isBusy()`; or
+     *  - the row holds an open reservation: an earlier admission recorded its run in
+     *    `status_run_admitted` and no terminal has closed that run yet; or
      *  - the row's status run moved since THIS instance was read: another admission opened a run in
-     *    between. Checked on the row, not only the timeline, because activitylog may buffer the
-     *    `running` event past the commit.
+     *    between.
+     * The last two are read off the row, not the timeline, because activitylog may buffer the
+     * `running` event past the commit, and a freshly loaded tenant would then read idle.
      *
      * `$start` receives the locked, fresh model; this instance takes its attributes afterwards so the
      * caller's response reads what was written. Returns false (nothing started) when refused.
@@ -334,11 +338,16 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             /** @var static|null $locked */
             $locked = $this->newQuery()->whereKey($this->getKey())->lockForUpdate()->first();
 
-            if ($locked === null || $locked->status_run_id !== $seenRun || $locked->isBusy()) {
+            if ($locked === null || $locked->status_run_id !== $seenRun || $locked->hasOpenAdmission() || $locked->isBusy()) {
                 return null;
             }
 
             $start($locked);
+
+            // The reservation: the run this start opened (or continues), recorded on the row in the same
+            // transaction, so it is durable before the lock is released whatever the activity log buffers.
+            $locked->status_run_admitted = $locked->status_run_id;
+            $locked->save();
 
             return $locked;
         });
@@ -350,6 +359,18 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->setRawAttributes($admitted->getAttributes(), true);
 
         return true;
+    }
+
+    /**
+     * Whether an admitted operation is still open on the row: {@see admitOperation()} recorded the run
+     * it admitted, and no terminal (markActive/markFailed, pack complete/failed) has closed that run.
+     * A row never admitted through the seam (null) defers to {@see isBusy()} alone.
+     */
+    private function hasOpenAdmission(): bool
+    {
+        return $this->status_run_admitted !== null
+            && $this->status_run_admitted === $this->status_run_id
+            && $this->status_run_closed !== $this->status_run_id;
     }
 
     /**
