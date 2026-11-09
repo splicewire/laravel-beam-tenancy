@@ -19,6 +19,7 @@ use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Analytics\Contracts\AnalyticsIdResolver;
+use Splicewire\Beam\Analytics\Contracts\MeasurementSettings;
 use Splicewire\Beam\Brand\BrandResolver;
 use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
@@ -36,6 +37,7 @@ use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
 use Splicewire\Beam\Tenancy\Analytics\TenantAnalyticsIdResolver;
+use Splicewire\Beam\Tenancy\Analytics\TenantMeasurementSettings;
 use Splicewire\Beam\Tenancy\Brand\TenantBrandResolver;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PooledAwareTenantsMigrateFresh;
@@ -862,6 +864,10 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // analytics ADR-0237 d4-d5 (EP-33): on a Site Host the tenant's own GA4 id, and never a container; elsewhere the
         // install's resolver answers, as the sitemap base URL is rebound below.
         $this->app->extend(AnalyticsIdResolver::class, fn (AnalyticsIdResolver $resolver, $app) => new TenantAnalyticsIdResolver($app, $resolver));
+
+        // analytics-area 05: what the Measurement area shows a tenant is its own Site Settings, read through analytics'
+        // MeasurementSettings port, never the id port above, which answers the install's id on a tenant's app host.
+        $this->app->extend(MeasurementSettings::class, fn (MeasurementSettings $settings, $app) => new TenantMeasurementSettings($settings, $app['config']));
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;
