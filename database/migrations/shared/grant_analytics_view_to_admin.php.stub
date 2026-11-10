@@ -21,6 +21,14 @@ use Spatie\Permission\PermissionRegistrar;
  * `beam.tenancy.seat_role_permissions` without `Admin => analytics.view` is skipped. `down()` removes this grant from `Admin`
  * and drops the permission row only when no role or user still holds it.
  *
+ * ROLLBACK REMOVES THE ONE SHARED GRANT (charter, analytics-area 16). Where a host's own migration makes the same grant (the
+ * flagship's 2026_11_10_000100_seed_analytics_view_permission), there is still ONE Admin→analytics.view row, held by both
+ * migrations, and each `down()` is a working revoke: rolling back EITHER one takes the grant away from every Admin (and, with
+ * nothing else holding it, the `analytics.view` row too) while the other still reads as run. To restore it, run an `up()`
+ * again: migrate this one forward again, or re-run the host's own (on the flagship,
+ * `php artisan migrate:refresh --path=database/migrations/2026_11_10_000100_seed_analytics_view_permission.php`), or re-run a
+ * host seeder that grants it (the flagship's `PermissionsSeeder` does). Measured both ways on the flagship composition.
+ *
  * Self-contained: Laravel and spatie/laravel-permission only (both the host's), so it keeps running after the package goes.
  */
 return new class extends Migration
