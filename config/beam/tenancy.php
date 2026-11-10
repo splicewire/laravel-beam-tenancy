@@ -36,6 +36,16 @@ return [
     ],
 
     /*
+     * The permissions each tier role holds by default (Seats\SeatRolePermissions; analytics-area 16, owner ruling
+     * 2026-11-10): a workspace's owner and admin seats hold the tenant `Admin` role, and Admin holds `analytics.view`, so
+     * they open the Analytics section on every host. The role stays the host's; this only adds a missing grant, when
+     * tenancy seats into the role and through the shared back-fill migration. Add-only. Set [] to opt out.
+     */
+    'seat_role_permissions' => [
+        'Admin' => ['analytics.view'],
+    ],
+
+    /*
      * End tenancy when a web request terminates, so the next request in the same process starts in
      * central context.
      *

@@ -662,6 +662,8 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 'create_tenant_machine_identities_table',
                 // A Hosted site's Site Settings (analytics ADR-0237 d6, EP-33): shared by default, read in the tenant schema.
                 'shared/create_site_settings_table',
+                // analytics-area 16: back-fill the package default, every tenant Admin role holds analytics.view.
+                'shared/grant_analytics_view_to_admin',
             ]);
     }
 
@@ -868,6 +870,13 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // analytics-area 05: what the Measurement area shows a tenant is its own Site Settings, read through analytics'
         // MeasurementSettings port, never the id port above, which answers the install's id on a tenant's app host.
         $this->app->extend(MeasurementSettings::class, fn (MeasurementSettings $settings, $app) => new TenantMeasurementSettings($settings, $app['config']));
+
+        // analytics-area 16 (owner ruling: a package default): inside a tenant, a principal holding the analytics.view
+        // PERMISSION (the tenant Admin role's default, Seats\SeatRolePermissions) holds the analytics.view ENTITLEMENT.
+        // Decorates whatever resolver the host binds; narrow by contract (one key, tenant only, from the permission).
+        if (interface_exists(\Rushing\PermissionCascade\Contracts\EntitlementResolver::class)) {
+            $this->app->extend(\Rushing\PermissionCascade\Contracts\EntitlementResolver::class, fn ($resolver) => new Entitlements\TenantAnalyticsEntitlement($resolver));
+        }
 
         if (! interface_exists(SitemapBaseUrlResolver::class)) {
             return;

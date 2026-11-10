@@ -1,0 +1,109 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\Schema;
+use Spatie\Permission\Guard;
+use Spatie\Permission\PermissionRegistrar;
+
+/**
+ * Back-fill: every existing tenant `Admin` role holds `analytics.view` (analytics-area 16, owner ruling 2026-11-10: a
+ * PACKAGE default, `beam.tenancy.seat_role_permissions`). New seats get it when laravel-beam-tenancy seats them; this reaches
+ * the roles that already hold seats.
+ *
+ * SHARED, so it runs in the central pass AND each tenant's pass, which covers both permission topologies the estate runs:
+ * central tables keyed by `team_id` (the flagship: the `Admin` rows are central) and per-schema tables (the tower starter:
+ * each tenant schema holds its own `Admin`). A pass whose connection carries no role tables, or no `Admin`, does nothing.
+ * It writes on the connection the pass has already established, never one it picks itself (docs/agents/traps/tenancy.md).
+ *
+ * ADD-ONLY and idempotent: `up()` creates the permission where missing and inserts each missing grant; it never revokes or
+ * re-syncs anything else a role holds. A host whose own migration already made this grant (the flagship's
+ * 2026_11_10_000100_seed_analytics_view_permission) finds it present and adds nothing. A host that set
+ * `beam.tenancy.seat_role_permissions` without `Admin => analytics.view` is skipped. `down()` removes this grant from `Admin`
+ * and drops the permission row only when no role or user still holds it.
+ *
+ * Self-contained: Laravel and spatie/laravel-permission only (both the host's), so it keeps running after the package goes.
+ */
+return new class extends Migration
+{
+    private const ROLE = 'Admin';
+
+    private const PERMISSION = 'analytics.view';
+
+    public function up(): void
+    {
+        if (! $this->applies() || ($models = $this->models()) === null) {
+            return;
+        }
+        [$roleModel, $permissionModel] = $models;
+
+        $registrar = app(PermissionRegistrar::class);
+        $teamKey = config('permission.teams') ? config('permission.column_names.team_foreign_key', 'team_id') : null;
+        $previousTeam = $teamKey !== null ? $registrar->getPermissionsTeamId() : null;
+
+        try {
+            foreach ($roleModel::query()->where('name', self::ROLE)->get() as $role) {
+                if ($teamKey !== null) {
+                    $registrar->setPermissionsTeamId($role->{$teamKey});
+                }
+                $permission = $permissionModel::findOrCreate(self::PERMISSION, $role->guard_name ?? Guard::getDefaultName($permissionModel));
+                if (! $role->permissions()->whereKey($permission->getKey())->exists()) {
+                    $role->givePermissionTo($permission);
+                }
+            }
+        } finally {
+            if ($teamKey !== null) {
+                $registrar->setPermissionsTeamId($previousTeam);
+            }
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    public function down(): void
+    {
+        if (($models = $this->models()) === null) {
+            return;
+        }
+        [$roleModel, $permissionModel] = $models;
+
+        foreach ($permissionModel::query()->where('name', self::PERMISSION)->get() as $permission) {
+            foreach ($roleModel::query()->where('name', self::ROLE)->where('guard_name', $permission->guard_name)->get() as $role) {
+                $role->permissions()->detach($permission->getKey());
+            }
+            if (! $permission->roles()->exists() && ! $this->heldDirectly($permission)) {
+                $permission->delete();
+            }
+        }
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    /** The host kept the package default: Admin holds analytics.view in `beam.tenancy.seat_role_permissions`. */
+    private function applies(): bool
+    {
+        $map = config('beam.tenancy.seat_role_permissions', [self::ROLE => [self::PERMISSION]]);
+
+        return is_array($map) && in_array(self::PERMISSION, (array) ($map[self::ROLE] ?? []), true);
+    }
+
+    /** @return array{0: class-string, 1: class-string}|null spatie's configured models, when this connection has their tables */
+    private function models(): ?array
+    {
+        $roleModel = config('permission.models.role');
+        $permissionModel = config('permission.models.permission');
+
+        if (! is_string($roleModel) || ! is_string($permissionModel)
+            || ! Schema::hasTable((new $roleModel)->getTable()) || ! Schema::hasTable((new $permissionModel)->getTable())) {
+            return null;
+        }
+
+        return [$roleModel, $permissionModel];
+    }
+
+    private function heldDirectly(object $permission): bool
+    {
+        $table = config('permission.table_names.model_has_permissions', 'model_has_permissions');
+        $column = config('permission.column_names.permission_pivot_key') ?: 'permission_id';
+
+        return Schema::hasTable($table) && $permission->getConnection()->table($table)->where($column, $permission->getKey())->exists();
+    }
+};

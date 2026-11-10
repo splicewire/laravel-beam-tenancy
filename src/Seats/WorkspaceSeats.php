@@ -107,6 +107,8 @@ class WorkspaceSeats
         foreach ($changes as $change) {
             if (str_starts_with($change, '+')) {
                 $mirror->assignRole(substr($change, 1));
+                // The tier role's default permissions (analytics-area 16): Admin holds analytics.view on every host.
+                app(SeatRolePermissions::class)->ensure(substr($change, 1));
             } elseif (str_starts_with($change, '-')) {
                 $mirror->removeRole(substr($change, 1));
             }

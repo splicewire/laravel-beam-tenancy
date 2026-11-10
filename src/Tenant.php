@@ -1471,6 +1471,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             );
 
             $tenantUser->assignRole('Admin');
+            // The tier role's default permissions (analytics-area 16): Admin holds analytics.view on every host.
+            app(Seats\SeatRolePermissions::class)->ensure('Admin');
         });
     }
 }
