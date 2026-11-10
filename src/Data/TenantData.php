@@ -81,7 +81,6 @@ use Splicewire\Beam\Workflows\Data\StatusStepData;
     label: 'Tenants',
     group: 'Platform',
     icon: 'building',
-    form: 'bare',
     // Nav placement, descended from tower's declaration with the teardown (ticket 20 step 2). These are
     // not projection — they say where the resource sits in the admin nav — and unlike `editData` a host
     // that disagrees keeps a working escape hatch: nav is read off `definitions($realm)`, the manifest
