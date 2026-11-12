@@ -40,9 +40,13 @@ return [
      * 2026-11-10): a workspace's owner and admin seats hold the tenant `Admin` role, and Admin holds `analytics.view`, so
      * they open the Analytics section on every host. The role stays the host's; this only adds a missing grant, when
      * tenancy seats into the role and through the shared back-fill migration. Add-only. Set [] to opt out.
+     * Admin also holds `billing.view` (launch ticket 41, owner ruling 2026-11-12: "in the tenant realm an owner basically is
+     * an admin accessing that space"): a workspace's owner and admin seats open billing. TENANT realm only: this map names
+     * the tenant tier role, and no operator/central role is granted here. billing.view has NO back-fill migration: seats
+     * carry it from seating on; roles that already hold seats get it from a later seed run of this map.
      */
     'seat_role_permissions' => [
-        'Admin' => ['analytics.view'],
+        'Admin' => ['analytics.view', 'billing.view'],
     ],
 
     /*

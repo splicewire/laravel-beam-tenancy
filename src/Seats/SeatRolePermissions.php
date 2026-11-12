@@ -10,7 +10,8 @@ use Spatie\Permission\PermissionRegistrar;
  * The permissions a seat's tier role holds by default (analytics-area 16, owner ruling 2026-11-10: a PACKAGE default):
  * `beam.tenancy.seat_role_permissions`, role name => permission names. Out of the box the tenant `Admin` role, which
  * {@see WorkspaceSeats} gives a workspace's owner and admin seats (`beam.tenancy.seat_roles`), holds `analytics.view`, so
- * every host's workspace owner and admin open its Analytics section without the host re-deriving the grant.
+ * every host's workspace owner and admin open its Analytics section without the host re-deriving the grant. Admin also
+ * holds `billing.view` (launch ticket 41, owner ruling 2026-11-12), so the same seats open billing; tenant realm only.
  *
  * The role itself stays the host's: it is created by the host's permission seeder (the flagship's `PermissionsSeeder`, the
  * tower starter's through Tower's `SeedPermissions` step), never here. So the grant is applied where tenancy meets the
@@ -25,7 +26,7 @@ use Spatie\Permission\PermissionRegistrar;
 class SeatRolePermissions
 {
     /** The package default, used when the host's config names none. */
-    public const DEFAULTS = ['Admin' => ['analytics.view']];
+    public const DEFAULTS = ['Admin' => ['analytics.view', 'billing.view']];
 
     /** @return array<string, list<string>> */
     public static function map(): array

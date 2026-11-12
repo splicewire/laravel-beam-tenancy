@@ -67,7 +67,7 @@ it('gives the Admin role analytics.view when an owner or an admin is seated, and
         ->and(aa16Holds('Admin'))->toBe(['site.edit']);
 
     $this->seats->seat($this->tenant, aa16User('admin@example.test'), 'admin');
-    expect(aa16Holds('Admin'))->toBe(['analytics.view', 'site.edit'])
+    expect(aa16Holds('Admin'))->toBe(['analytics.view', 'billing.view', 'site.edit'])
         ->and(aa16Holds('Silo Editor'))->toBe([]);
 });
 
@@ -76,7 +76,7 @@ it('gives Admin analytics.view when a tenant is given its owner', function () {
 
     $this->tenant->assignOwner($owner);
 
-    expect(aa16Holds('Admin'))->toBe(['analytics.view', 'site.edit'])
+    expect(aa16Holds('Admin'))->toBe(['analytics.view', 'billing.view', 'site.edit'])
         ->and(TenantUser::query()->findOrFail($owner->getKey())->getRoleNames()->all())->toBe(['Admin']);
 });
 
@@ -87,7 +87,7 @@ it('is add-only and idempotent: seating again adds no grant and revokes nothing'
     $this->seats->seat($this->tenant, aa16User('b@example.test'), 'owner');
     expect(app(SeatRolePermissions::class)->ensure('Admin'))->toBe(0)
         ->and(aa16Grants())->toBe($grants)
-        ->and(aa16Holds('Admin'))->toBe(['analytics.view', 'site.edit']);
+        ->and(aa16Holds('Admin'))->toBe(['analytics.view', 'billing.view', 'site.edit']);
 });
 
 it('grants nothing when the host opts out with an empty map', function () {
