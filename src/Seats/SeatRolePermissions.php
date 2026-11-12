@@ -16,8 +16,10 @@ use Spatie\Permission\PermissionRegistrar;
  * The role itself stays the host's: it is created by the host's permission seeder (the flagship's `PermissionsSeeder`, the
  * tower starter's through Tower's `SeedPermissions` step), never here. So the grant is applied where tenancy meets the
  * role: whenever it SEATS someone into it ({@see WorkspaceSeats}, {@see \Splicewire\Beam\Tenancy\Tenant::assignOwner()}),
- * which is the first moment a fresh tenant's role is known to exist, and by the shared back-fill migration for roles that
- * already hold seats.
+ * which is the first moment a fresh tenant's role is known to exist. For roles that already hold seats, ONLY
+ * `analytics.view` has a back-fill (the shared `grant_analytics_view_to_admin` migration, which grants that one
+ * permission); `billing.view` has none, and a role seated before it joined the map gets it from a later seed run of this
+ * map (launch ticket 41: defaults only).
  *
  * ADD-ONLY and idempotent: it creates a missing permission row and a missing grant, and never revokes or re-syncs anything
  * else the role holds. It writes on the AMBIENT connection, the one tenancy has already switched to, and does nothing when
