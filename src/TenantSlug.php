@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy;
 
 use Closure;
 use InvalidArgumentException;
+use Splicewire\Beam\Tenancy\Localization\TenancyError;
 
 /**
  * The declared grammar of a tenant slug: ONE lowercase DNS label.
@@ -51,6 +52,12 @@ final class TenantSlug
         return preg_match(self::PATTERN, $slug) === 1;
     }
 
+    /** The owned grammar sentence in the current request language; RULE remains the English diagnostic. */
+    public static function message(): string
+    {
+        return TenancyError::InvalidSlug->message();
+    }
+
     /**
      * The grammar as a Laravel validation rule, for a door's `rules()`. A closure rather than `regex:` on purpose: an
      * API documenter that meets `regex:` pastes the raw pattern into the published field description and fabricates
@@ -62,7 +69,7 @@ final class TenantSlug
     {
         return static function (string $attribute, mixed $value, Closure $fail): void {
             if (! is_string($value) || ! self::isValid($value)) {
-                $fail(self::RULE);
+                $fail(self::message());
             }
         };
     }

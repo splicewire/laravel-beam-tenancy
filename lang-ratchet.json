@@ -1,0 +1,7 @@
+{
+    "about": "localization 12 ratchet: user-facing string literals in response-reaching calls. May only fall. Regenerate with `php artisan beam:lang:ratchet --write` (or the package's equivalent); never edit by hand.",
+    "population": "PHP source under src/: constant, interpolated and forwarded (->getMessage()) text passed to abort* (message only), HttpException, withMessages/withErrors, response()->json and new JsonResponse message/error, MailMessage subject/greeting/line/salutation/action, Notification toArray/toDatabase/toBroadcast values, flash messages, and copy-named arguments of runtime Data objects; exclusions reported with their reasons. Not read: Blade views, helper-built text, ->with(), raw Response bodies, DTO wrappers, match/summary arms, variable-forwarded messages (each sweep classifies these by hand).",
+    "total": 0,
+    "files": [],
+    "excluded": []
+}

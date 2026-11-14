@@ -5,6 +5,8 @@ namespace Splicewire\Beam\Tenancy\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Tenancy\Exceptions\SoleTenantNotIdentified;
+use Splicewire\Beam\Tenancy\Localization\TenancyError;
+use Splicewire\Beam\Tenancy\Localization\TenancyHttpException;
 use Splicewire\Beam\Tenancy\Resolvers\SoleTenantResolver;
 use Stancl\Tenancy\Middleware\IdentificationMiddleware;
 use Stancl\Tenancy\Tenancy;
@@ -37,7 +39,12 @@ class InitializeTenancyBySoleTenant extends IdentificationMiddleware
             // Raised as a concrete HttpException so every exception handler answers 503. A host handler that maps
             // only `HttpException` (the flagship's envelope renderer does) would otherwise answer 500 for a refusal
             // that is not a server fault. A host's own `$onFail` still sees the original first.
-            throw new HttpException(503, $e->getMessage(), $e);
+            $error = $e->explicitCodedError();
+            if ($error instanceof TenancyError) {
+                throw TenancyHttpException::for(503, $error, [], $e, $e->getHeaders());
+            }
+
+            throw new HttpException(503, __('beam-tenancy::messages.sole_tenant_unknown', ['detail' => $e->getMessage()]), $e);
         }
     }
 }

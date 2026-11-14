@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Tenancy\Exceptions;
 
+use Splicewire\Beam\Localization\CodedError;
+use Splicewire\Beam\Tenancy\Localization\TenancyError;
 use Stancl\Tenancy\Contracts\TenantCouldNotBeIdentifiedException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -15,14 +17,27 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
  */
 class SoleTenantNotIdentified extends TenantCouldNotBeIdentifiedException implements HttpExceptionInterface
 {
+    private ?CodedError $codedError = null;
+
+    public function explicitCodedError(): ?CodedError
+    {
+        return $this->codedError;
+    }
+
     public static function empty(): self
     {
-        return new self('This sole-tenant install has no tenant yet.');
+        $exception = new self(TenancyError::SoleTenantEmpty->defaultMessage());
+        $exception->codedError = TenancyError::SoleTenantEmpty;
+
+        return $exception;
     }
 
     public static function ambiguous(): self
     {
-        return new self('This install is configured for one tenant but has more than one; it will not guess which to serve.');
+        $exception = new self(TenancyError::SoleTenantAmbiguous->defaultMessage());
+        $exception->codedError = TenancyError::SoleTenantAmbiguous;
+
+        return $exception;
     }
 
     public function getStatusCode(): int

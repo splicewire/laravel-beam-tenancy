@@ -10,6 +10,8 @@ use Splicewire\Beam\Accounts\Data\RoleOptionsData;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Http\Controller;
 use Splicewire\Beam\Tenancy\Data\TenantMemberRoleInputData;
+use Splicewire\Beam\Tenancy\Localization\TenancyError;
+use Splicewire\Beam\Tenancy\Localization\TenancyHttpException;
 use Splicewire\Beam\Tenancy\Seats\WorkspaceSeats;
 
 class TenantMemberController extends Controller
@@ -88,7 +90,7 @@ class TenantMemberController extends Controller
         if ($id === $currentUser->id && $input->role !== Role::Owner->value) {
             $ownerCount = $tenant->users()->wherePivot('role', Role::Owner->value)->count();
             if ($ownerCount <= 1) {
-                abort(422, 'Cannot remove the last owner. Transfer ownership first.');
+                throw TenancyHttpException::for(422, TenancyError::LastOwnerTransferRequired);
             }
         }
 
@@ -102,7 +104,7 @@ class TenantMemberController extends Controller
         app(WorkspaceSeats::class)->seat($tenant, $member, $input->role);
 
         return response()->json([
-            'message' => 'Role updated.',
+            'message' => __('beam-tenancy::messages.role_updated'),
             'data' => $this->presentMember($member),
         ]);
     }
@@ -119,7 +121,7 @@ class TenantMemberController extends Controller
         if ($id === $currentUser->id) {
             $ownerCount = $tenant->users()->wherePivot('role', Role::Owner->value)->count();
             if ($ownerCount <= 1) {
-                abort(422, 'Cannot remove the last owner.');
+                throw TenancyHttpException::for(422, TenancyError::LastOwner);
             }
         }
 
@@ -132,7 +134,7 @@ class TenantMemberController extends Controller
         $tenant->users()->updateExistingPivot($id, ['removed_at' => now()]);
 
         return response()->json([
-            'message' => 'Member removed.',
+            'message' => __('beam-tenancy::messages.member_removed'),
             'data' => $snapshot,
         ]);
     }

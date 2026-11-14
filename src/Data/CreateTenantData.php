@@ -2,11 +2,13 @@
 
 namespace Splicewire\Beam\Tenancy\Data;
 
+use Illuminate\Contracts\Validation\Validator;
 use Spatie\LaravelData\Attributes\Validation\In;
 use Spatie\LaravelData\Attributes\Validation\Max;
 use Spatie\LaravelData\Attributes\Validation\Regex;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Tenancy\Localization\TenancyValidationException;
 use Splicewire\Beam\Tenancy\TenantSlug;
 use Splicewire\Beam\Tenancy\TenantStorage;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
@@ -84,10 +86,21 @@ class CreateTenantData extends BeamData implements MapsToModelAttributes
         return parent::prepareForPipeline($properties);
     }
 
+    public static function withValidator(Validator $validator): void
+    {
+        parent::withValidator($validator);
+        $validator->after(function (Validator $validator): void {
+            $failed = $validator->failed()['slug'] ?? [];
+            if (isset($failed['Max']) || isset($failed['Regex'])) {
+                $validator->setException(TenancyValidationException::class);
+            }
+        });
+    }
+
     /** @return array<string, string> */
     public static function messages(): array
     {
-        return ['slug.max' => TenantSlug::RULE, 'slug.regex' => TenantSlug::RULE];
+        return ['slug.max' => TenantSlug::message(), 'slug.regex' => TenantSlug::message()];
     }
 
     /**
