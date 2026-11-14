@@ -38,8 +38,8 @@ What it carries today:
 - **`Database/Seeders/DemoTenantSeeder`** — the package's only seeder. Seats beam-accounts' demo
   roster (Owner/Admin/Member) on a dedicated `beam-demo` tenant, so the estate has an ordinary,
   role-less tenant member to authorize *against*. Self-registers into beam-core's `BeamSeedManifest`
-  at `order: 20` (after beam-accounts' `DemoTeamSeeder` at 10) behind
-  `beam.tenancy.demo.seed_tenant`, whose null default resolves at boot to `! production`. Reaching
+  at `order: 20` (after beam-accounts' `DemoTeamSeeder` at 10) as a `demo` step, so the run's
+  Seeding Scenario decides where it runs; `beam.tenancy.demo.seed_tenant` is only the host's opt-out. Reaching
   DOWN into beam-accounts is the only legal direction here — beam-accounts must never learn tenants
   exist. See the README's "Demo tenant" section.
 
