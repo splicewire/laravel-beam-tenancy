@@ -35,6 +35,7 @@ use Splicewire\Beam\Provision\Tofu\TofuApplyDispatcher;
 use Splicewire\Beam\Provision\Tofu\TofuModulesPath;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Seed\BeamSeedManifest;
+use Splicewire\Beam\Seed\SeedStep;
 use Splicewire\Beam\Sitemap\Resolvers\ConfigSitemapBaseUrlResolver;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Surgeon\AuditScanPaths;
@@ -1060,10 +1061,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      *
      * - **Inert without the manifest.** A host that composes beam-tenancy without beam's seed
      *   command has nothing to register into and pays nothing.
-     * - **Gated, non-production by default.** `beam.tenancy.demo.seed_tenant` defaults to null,
-     *   and a null resolves HERE to `! production` — the manifest's own check is a raw
-     *   `config($gate)` and cannot run environment logic, so the resolved boolean is written back
-     *   onto the same key. Explicit config always wins.
+     * - **A `demo` step.** Which environment seats the demo tenant is the run's Seeding Scenario's
+     *   choice (seeding-scenarios 01): `local` includes `demo`, `baseline` does not. This provider
+     *   no longer reads the environment. `beam.tenancy.demo.seed_tenant` stays as the config gate
+     *   for the host's explicit opt-out: `false` keeps the step off under every scenario, and null
+     *   (the default) is no objection. The resolved boolean is written back onto the same key so
+     *   the manifest's raw `config($gate)` read sees it.
      * - **Ordered after beam-accounts.** `order: 20` against beam-accounts' `10`, so the demo
      *   users exist before this seeder seats them. (The seeder `firstOrCreate`s them anyway, so
      *   ordering is an optimisation, not a dependency.)
@@ -1075,7 +1078,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         }
 
         $flag = config('beam.tenancy.demo.seed_tenant');
-        $enabled = $flag !== null ? (bool) $flag : ! $this->app->environment('production');
+        $enabled = $flag === null || (bool) $flag;
         config(['beam.tenancy.demo.seed_tenant' => $enabled]);
 
         $this->app->make(BeamSeedManifest::class)->register(
@@ -1083,6 +1086,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             seederClass: DemoTenantSeeder::class,
             order: 20,
             configGate: 'beam.tenancy.demo.seed_tenant',
+            memberships: SeedStep::DEMO,
         );
     }
 

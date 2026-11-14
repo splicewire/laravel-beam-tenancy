@@ -145,9 +145,11 @@ return [
      * beam-accounts' roster (beam-tenancy requires beam-accounts, never the reverse) and seats
      * it on a tenant of its own.
      *
-     * `seed_tenant` is the seed-manifest gate. Null (the default) resolves at boot to
-     * `! production`, mirroring `beam.accounts.demo.seed_users` — dev and preview seed by
-     * default, production never fabricates demo data. An explicit value always wins.
+     * The seeder's step is a `demo` step: which environment runs it is the Seeding Scenario's
+     * choice (beam's config/beam/seed.php). `local` includes demo; an environment without a
+     * scenario of its name gets `baseline`, which does not. `seed_tenant` is only the host's
+     * opt-out, as `beam.accounts.demo.seed_users` is: false keeps the step off under every
+     * scenario; null (the default) and true leave it to the scenario.
      *
      * The tenant is DEDICATED (its own id/slug), not an existing one. Two reasons, both
      * measured: an existing tenant may already carry seats whose `role` is outside the

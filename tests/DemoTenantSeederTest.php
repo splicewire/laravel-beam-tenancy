@@ -9,6 +9,8 @@ use Splicewire\Beam\Accounts\Authorization\MembershipPolicy;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Accounts\Facades\BeamDemo;
 use Splicewire\Beam\Seed\BeamSeedManifest;
+use Splicewire\Beam\Seed\SeedStep;
+use Splicewire\Beam\Tenancy\BeamTenancyServiceProvider;
 use Splicewire\Beam\Tenancy\Database\Seeders\DemoTenantSeeder;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
@@ -157,27 +159,55 @@ it('is idempotent — a second run duplicates no seat, no user and no tenant', f
         ->and($before['seats'])->toHaveCount(3);
 });
 
-it('skips itself when the demo affordances are off (production posture)', function () {
+it('seeds with the demo login door shut: the scenario decides what seeds, the door only who logs in', function () {
+    // seeding-scenarios 01: this was "skips itself when the demo affordances are off". The seeder no longer reads
+    // BeamDemo::enabled(); a shut door keeps these subjects from logging in, on the login path.
     config(['beam.accounts.demo.enabled' => false]);
 
     app(DemoTenantSeeder::class)->run();
 
-    expect(DB::table('tenants')->count())->toBe(0)
-        ->and(DB::table('tenant_users')->count())->toBe(0);
+    expect(DB::table('tenants')->count())->toBe(1)
+        ->and(DB::table('tenant_users')->count())->toBeGreaterThan(0);
 });
 
-it('registers itself into the beam seed manifest after beam-accounts, behind a config gate', function () {
+it('registers itself into the beam seed manifest after beam-accounts, as a demo step behind a config gate', function () {
     $step = collect(app(BeamSeedManifest::class)->steps())
         ->firstWhere('package', 'splicewire/laravel-beam-tenancy');
 
     expect($step)->not->toBeNull()
         ->and($step->seeder)->toBe(DemoTenantSeeder::class)
         ->and($step->configGate)->toBe('beam.tenancy.demo.seed_tenant')
+        ->and($step->memberships)->toBe([SeedStep::DEMO])
         // beam-accounts' DemoTeamSeeder registers at 10; the demo users must exist first.
         ->and($step->order)->toBeGreaterThan(10)
-        // Null resolves to `! production` at boot, and the resolved boolean is written back so
-        // the manifest's raw `config($gate)` read sees the effective value.
+        // Null is no objection, and the resolved boolean is written back so the manifest's raw
+        // `config($gate)` read sees the effective value.
         ->and(config('beam.tenancy.demo.seed_tenant'))->toBeTrue();
+});
+
+it('no longer reads the environment for its seed gate: production with no host opinion leaves it open', function () {
+    app()['env'] = 'production';
+    config(['beam.tenancy.demo.seed_tenant' => null]);
+    app()->register(new BeamTenancyServiceProvider(app()), force: true);
+
+    expect(config('beam.tenancy.demo.seed_tenant'))->toBeTrue();
+});
+
+it('is left out under the baseline scenario and seeds the demo tenant under local, in production', function () {
+    app()['env'] = 'production';
+
+    $this->artisan('splicewire:beam:seed', ['--force' => true])
+        ->expectsOutputToContain('splicewire/laravel-beam-tenancy: left out by scenario baseline (does not include demo)')
+        ->assertExitCode(0);
+
+    expect(DB::table('tenants')->count())->toBe(0);
+
+    $this->artisan('splicewire:beam:seed', ['--force' => true, '--scenario' => 'local'])
+        ->expectsOutputToContain('splicewire/laravel-beam-tenancy: '.DemoTenantSeeder::class)
+        ->assertExitCode(0);
+
+    expect(DB::table('tenants')->count())->toBe(1)
+        ->and(DB::table('tenant_users')->count())->toBeGreaterThan(0);
 });
 
 /**

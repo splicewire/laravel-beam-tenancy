@@ -110,11 +110,8 @@ class DemoTenantSeeder extends Seeder
 {
     public function run(): void
     {
-        if (! BeamDemo::enabled()) {
-            $this->command?->warn('beam-tenancy: demo tenant skipped (demo affordances disabled in this environment).');
-
-            return;
-        }
+        // No `BeamDemo::enabled()` check here (seeding-scenarios 01): the Seeding Scenario decides what seeds, and the
+        // demo door decides who can log in, on the login path, as in beam-accounts' DemoTeamSeeder.
 
         $tenant = $this->tenant();
 

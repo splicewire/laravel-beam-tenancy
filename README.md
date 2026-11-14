@@ -124,7 +124,8 @@ php artisan db:seed --class="Splicewire\Beam\Tenancy\Database\Seeders\DemoTenant
 
 ```php
 'demo' => [
-    // The seed-manifest gate. Null resolves at boot to `! production`.
+    // The host's opt-out: false keeps the demo step off. Which environment runs it is the
+    // Seeding Scenario's choice (`local` includes demo; `baseline` does not).
     'seed_tenant' => env('BEAM_TENANCY_SEED_DEMO_TENANT'),
 
     'tenant' => [
@@ -219,7 +220,9 @@ It registers into registries `splicewire/laravel-beam` owns:
 - [`beam.doctor.audits`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.doctor.audits.mdx):
   the doctor audits listed above.
 - [`beam.seed.steps`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.seed.steps.mdx):
-  the demo-tenant seeder, which runs only while `beam.tenancy.demo.seed_tenant` is on.
+  the demo-tenant seeder, a `demo` step, which runs under a Seeding Scenario that includes `demo`
+  ([`beam.seed.scenarios`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.seed.scenarios.mdx))
+  and while `beam.tenancy.demo.seed_tenant` is not false.
 - [`beam.surgeon.scan-paths`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.surgeon.scan-paths.mdx):
   the package's `src/Http` directory, so the surgeon audits scan its controllers.
 - [`beam.particle.resources`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.particle.resources.mdx):
