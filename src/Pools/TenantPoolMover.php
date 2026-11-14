@@ -7,6 +7,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use Splicewire\Beam\Data\MessageReferenceData;
 use Splicewire\Beam\Tenancy\HybridPostgresTenantDatabaseManager;
 use Splicewire\Beam\Tenancy\Support\TenancyConnections;
 use Splicewire\Beam\Tenancy\Tenant;
@@ -66,6 +67,16 @@ class TenantPoolMover
     /**
      * @return array<string, int> rows moved per table
      */
+    /**
+     * A pool-move step's stored reference (localization 37; RULING-04 M14): `beam-tenancy::status.<step>`.
+     *
+     * @param  array<string, string>  $parameters
+     */
+    private static function reference(string $step, string $default, array $parameters): MessageReferenceData
+    {
+        return MessageReferenceData::of('beam-tenancy::status.'.$step, $default, $parameters);
+    }
+
     public function move(Tenant $tenant, string $targetPool): array
     {
         if (! $tenant->isPooled()) {
@@ -93,7 +104,8 @@ class TenantPoolMover
         DB::purge($sourceName);
 
         try {
-            $tenant->markProvisioning('pool_move_prepare_target', "Preparing pool '{$targetPool}' ({$targetSchema})");
+            $tenant->withStatusReference(self::reference('pool_move_prepare_target', "Preparing pool ':pool' (:schema)", ['pool' => $targetPool, 'schema' => $targetSchema]), null,
+                fn () => $tenant->markProvisioning('pool_move_prepare_target', "Preparing pool '{$targetPool}' ({$targetSchema})"));
             $this->migrator->ensure($targetPool);
             $this->registerScopedConnection($targetName, $targetPool, $tenant);
 
@@ -108,14 +120,16 @@ class TenantPoolMover
             $tenant->write_blocked_at = now()->toDateTimeString();
             $tenant->save();
 
-            $tenant->markProvisioning('pool_move_copy', "Copying rows from pool '{$sourcePool}' to pool '{$targetPool}'");
+            $tenant->withStatusReference(self::reference('pool_move_copy', "Copying rows from pool ':source' to pool ':target'", ['source' => $sourcePool, 'target' => $targetPool]), null,
+                fn () => $tenant->markProvisioning('pool_move_copy', "Copying rows from pool '{$sourcePool}' to pool '{$targetPool}'"));
             $moved = $target->transaction(function () use ($source, $target, $tables) {
                 $this->deleteInPasses($target, $tables);
 
                 return $this->copy($source, $target, $tables);
             });
 
-            $tenant->markProvisioning('pool_move_flip', "Cutting over to pool '{$targetPool}'");
+            $tenant->withStatusReference(self::reference('pool_move_flip', "Cutting over to pool ':target'", ['target' => $targetPool]), null,
+                fn () => $tenant->markProvisioning('pool_move_flip', "Cutting over to pool '{$targetPool}'"));
             $sourceConnection = $tenant->tenancy_db_connection;
             $tenant->markPooled($targetPool);
             $tenant->setInternal('db_name', $targetSchema);
@@ -140,7 +154,13 @@ class TenantPoolMover
                 $tenant->save();
             }
 
-            $tenant->markFailed("Moving to pool '{$targetPool}' failed BEFORE cutover — pool '{$sourcePool}' is still authoritative: {$e->getMessage()}");
+            // localization 37 (M14, mixed): the stored description keeps today's bytes, exception included; the reader
+            // sees the localized wrapper, and the exception is the unprojected diagnostic.
+            $tenant->withStatusReference(
+                self::reference('pool_move_failed_before', "Moving to pool ':target' failed BEFORE cutover — pool ':source' is still authoritative.", ['target' => $targetPool, 'source' => $sourcePool]),
+                $e->getMessage(),
+                fn () => $tenant->markFailed("Moving to pool '{$targetPool}' failed BEFORE cutover — pool '{$sourcePool}' is still authoritative: {$e->getMessage()}"),
+            );
             TenancyConnections::forget($sourceName);
             TenancyConnections::forget($targetName);
 
@@ -150,12 +170,17 @@ class TenantPoolMover
         TenancyConnections::forget($targetName);
 
         try {
-            $tenant->markProvisioning('pool_move_cleanup', "Deleting the tenant's rows from pool '{$sourcePool}'");
+            $tenant->withStatusReference(self::reference('pool_move_cleanup', "Deleting the tenant's rows from pool ':source'", ['source' => $sourcePool]), null,
+                fn () => $tenant->markProvisioning('pool_move_cleanup', "Deleting the tenant's rows from pool '{$sourcePool}'"));
             $source = DB::connection($sourceName);
             HybridPostgresTenantDatabaseManager::assertScopedFrame($source, (clone $tenant)->markPooled($sourcePool));
             $this->cleanupSource($source, $tables, $moved);
         } catch (Throwable $e) {
-            $tenant->markFailed("Moved to pool '{$targetPool}' — it is authoritative — but deleting the old rows from pool '{$sourcePool}' ({$sourceSchema}) failed; they need manual deletion: {$e->getMessage()}");
+            $tenant->withStatusReference(
+                self::reference('pool_move_failed_after', "Moved to pool ':target' — it is authoritative — but deleting the old rows from pool ':source' (:schema) failed; they need manual deletion.", ['target' => $targetPool, 'source' => $sourcePool, 'schema' => $sourceSchema]),
+                $e->getMessage(),
+                fn () => $tenant->markFailed("Moved to pool '{$targetPool}' — it is authoritative — but deleting the old rows from pool '{$sourcePool}' ({$sourceSchema}) failed; they need manual deletion: {$e->getMessage()}"),
+            );
 
             throw $e;
         } finally {

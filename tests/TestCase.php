@@ -54,6 +54,13 @@ class TestCase extends Orchestra
             // (beam declares `^4.0|^5.0`) agree with the fixture.
             ActivitylogServiceProvider::class,
 
+            // localization 37: beam's provider, as every production host boots it, so its single namespace allocator
+            // hints this package's shipped lang/ and the shared MessagePresenters registry is bound (test harness only).
+            // data-schemas BEFORE beam, as every production host discovers it and as beam's own harness boots it: beam's
+            // packageBooted APPENDS to `data-schemas.strategies`, and with that key unset the append would replace the
+            // generator's default strategies (localization 37 leg finding; a beam follow-up on the 12/13 list).
+            \Schemastud\DataSchemas\LaravelDataSchemasServiceProvider::class,
+            \Splicewire\Beam\BeamServiceProvider::class,
             BeamTenancyServiceProvider::class,
         ];
     }

@@ -21,9 +21,11 @@ use Splicewire\Beam\Accounts\Oidc\IdentityTokenMinter;
 use Splicewire\Beam\Analytics\Contracts\AnalyticsIdResolver;
 use Splicewire\Beam\Analytics\Contracts\MeasurementSettings;
 use Splicewire\Beam\Brand\BrandResolver;
+use Splicewire\Beam\Data\MessageReferenceData;
 use Splicewire\Beam\Discovery\ResourceDiscoveryAutoMounter;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
+use Splicewire\Beam\Localization\Presentation\MessagePresenters;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Provision\Gcp\WorkloadIdentityCredentialResolver;
@@ -70,6 +72,7 @@ use Splicewire\Beam\Tenancy\Seats\SeatAcceptedInvitations;
 use Splicewire\Beam\Tenancy\Sitemap\TenantSitemapBaseUrlResolver;
 use Splicewire\Beam\Tenancy\Support\StanclTenancyContext;
 use Splicewire\Beam\Tenancy\Support\TenancyConnections;
+use Splicewire\Beam\Tenancy\Synthetic\SyntheticReporting;
 use Splicewire\Beam\Tenancy\Vault\TenancyVaultContextGuard;
 use Stancl\JobPipeline\JobPipeline;
 use Stancl\Tenancy\Database\Models\Tenant as StanclTenant;
@@ -719,8 +722,63 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      * beam-sitemap arm never trips this. Cross-tenant aggregation is deferred to tower (ADR-0166 §5) —
      * not bound here.
      */
+    /**
+     * localization 37 (RULING-04 M7, M14; CLASSIFY-26 #6): tenancy's status and synthetic-reporting keys, contributed to
+     * beam's shared MessagePresenters whichever provider registers first.
+     *
+     * - Adapters for every `beam-tenancy::status.*` key a marker or the pool mover stores as a reference.
+     * - A `status` identity for EXISTING rows whose ref alone determines the sentence: the two provisioning steps.
+     *   Every other existing tenancy row (pool moves, failures, packs, `Provisioning complete.`) stays literal; no
+     *   stored prose is matched.
+     * - An `activity` identity for synthetic-reporting rows: `log_name` + `event` + `properties.after.excludes`.
+     */
+    protected function registerStatusPresentation(): void
+    {
+        $this->callAfterResolving(MessagePresenters::class, static function (MessagePresenters $presenters): void {
+            $presenters
+                ->adapter('beam-tenancy::status.provisioning_create_database')
+                ->adapter('beam-tenancy::status.provisioning_migrate_database')
+                ->adapter('beam-tenancy::status.provisioning_complete')
+                ->adapter('beam-tenancy::status.pack_applying', ['slug' => 'string'])
+                ->adapter('beam-tenancy::status.pack_applied', ['slug' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_prepare_target', ['pool' => 'string', 'schema' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_copy', ['source' => 'string', 'target' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_flip', ['target' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_cleanup', ['source' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_failed_before', ['target' => 'string', 'source' => 'string'])
+                ->adapter('beam-tenancy::status.pool_move_failed_after', ['target' => 'string', 'source' => 'string', 'schema' => 'string'])
+                ->adapter('beam-tenancy::activity.synthetic_excluded')
+                ->adapter('beam-tenancy::activity.synthetic_included')
+                ->adapter('beam-tenancy::activity.synthetic_cleared');
+
+            $presenters->identity('status', static function (array $row): ?MessageReferenceData {
+                $defaults = ['provisioning_create_database' => 'Creating database', 'provisioning_migrate_database' => 'Running migrations'];
+                $ref = $row['ref'] ?? null;
+
+                return is_string($ref) && isset($defaults[$ref]) && ($row['state'] ?? null) === 'running'
+                    ? MessageReferenceData::of('beam-tenancy::status.'.$ref, $defaults[$ref])
+                    : null;
+            });
+
+            $presenters->identity('activity', static function (array $row): ?MessageReferenceData {
+                if (($row['log_name'] ?? null) !== SyntheticReporting::LOG_NAME) {
+                    return null;
+                }
+                $excludes = $row['properties']['after']['excludes'] ?? null;
+
+                return match (true) {
+                    ($row['event'] ?? null) === 'cleared' => MessageReferenceData::of('beam-tenancy::activity.synthetic_cleared', 'Synthetic reporting override cleared'),
+                    ($row['event'] ?? null) === 'set' && $excludes === true => MessageReferenceData::of('beam-tenancy::activity.synthetic_excluded', 'Synthetic tenants excluded from reporting'),
+                    ($row['event'] ?? null) === 'set' && $excludes === false => MessageReferenceData::of('beam-tenancy::activity.synthetic_included', 'Synthetic tenants included in reporting'),
+                    default => null,
+                };
+            });
+        });
+    }
+
     public function packageBooted(): void
     {
+        $this->registerStatusPresentation();
         $this->bindTenantModel();
 
         // Whoever accepts a workspace invitation is seated: the tenant mirror and their tier's role (WorkspaceSeats).

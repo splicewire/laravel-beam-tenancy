@@ -16,6 +16,7 @@ use Splicewire\Beam\Accounts\Concerns\HasMembers;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Accounts\Models\Invitation;
+use Splicewire\Beam\Data\MessageReferenceData;
 use Splicewire\Beam\Enums\LlmTask;
 use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\CentralActivityLog;
@@ -29,6 +30,7 @@ use Splicewire\Beam\Tenancy\Pools\PoolMigrator;
 use Splicewire\Beam\Tenancy\Synthetic\SyntheticReporting;
 use Splicewire\Beam\Workflows\Display\Concerns\HasStatusChannel;
 use Splicewire\Beam\Workflows\Display\State;
+use Splicewire\Beam\Workflows\Display\StatusEvent;
 use Splicewire\Beam\Workflows\Facades\Status;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
@@ -75,6 +77,13 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     public $incrementing = false;
 
+    /**
+     * The reference (and raw diagnostic) held for the NEXT status emission only (localization 37; R1).
+     *
+     * @var array{0: MessageReferenceData, 1: ?string}|null
+     */
+    private ?array $pendingStatusReference = null;
+
     protected $keyType = 'string';
 
     /** Activitylog 5 subject hook; Activitylog 4 calls tapActivity instead. */
@@ -118,6 +127,60 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
      * read now treats as closed ({@see isBusy()}, `StatusStepData::fold`): a run is never written after
      * its terminal event (owner-review-20261102 K-18a).
      */
+    /**
+     * Run a status marker with a stored message reference attached to its ONE next status emission (localization 37;
+     * RULING-04 M7/M13/M14; OWNER-RESOLUTION R1). The marker's own signature and stored English are unchanged; the
+     * reference lets the row render for its reader, and `$diagnostic` (raw, e.g. an exception message) is stored for
+     * operators and never projected.
+     *
+     * A host model overriding a marker without calling `parent::` simply writes a legacy row.
+     *
+     * @internal for the beam family's status producers (tenancy, tower); not a host API
+     *
+     * @template T
+     *
+     * @param  callable(): T  $mark
+     * @return T
+     */
+    public function withStatusReference(MessageReferenceData $reference, ?string $diagnostic, callable $mark): mixed
+    {
+        $this->pendingStatusReference = [$reference, $diagnostic];
+        try {
+            return $mark();
+        } finally {
+            $this->pendingStatusReference = null;
+        }
+    }
+
+    /**
+     * One status emission. Without a held reference this is exactly the Status facade call it always was; with one,
+     * the same event goes through the facade's `emit` carrying the reference (37b's R1 seam). The held reference is
+     * consumed either way.
+     */
+    private function emitStatus(State $state, ?string $message, ?string $ref = null): void
+    {
+        $held = $this->pendingStatusReference;
+        $this->pendingStatusReference = null;
+        if ($held === null) {
+            match ($state) {
+                State::Running => Status::running($this, $message, ref: $ref, runId: $this->status_run_id),
+                State::Complete => Status::complete($this, $message, ref: $ref, runId: $this->status_run_id),
+                State::Failed => Status::failed($this, $message, ref: $ref, runId: $this->status_run_id),
+                default => Status::emit($this, new StatusEvent($state, $ref, $message), $this->status_run_id),
+            };
+
+            return;
+        }
+
+        Status::emit($this, (new StatusEvent($state, $ref, $message))->referencing($held[0], $held[1]), $this->status_run_id);
+    }
+
+    /** Hold a family-owned constant reference unless a caller already holds its own. */
+    private function holdStatusReference(MessageReferenceData $reference): void
+    {
+        $this->pendingStatusReference ??= [$reference, null];
+    }
+
     public function markProvisioning(string $step, ?string $reason = null): void
     {
         if ($this->provisioning_status !== TenantProvisioningStatus::Active->value) {
@@ -131,7 +194,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             $this->save();
         }
 
-        Status::running($this, $reason ?? $step, ref: $step, runId: $this->status_run_id);
+        $this->emitStatus(State::Running, $reason ?? $step, $step);
     }
 
     /**
@@ -144,7 +207,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->status_run_closed = $this->status_run_id;
         $this->save();
 
-        Status::complete($this, 'Provisioning complete.', runId: $this->status_run_id);
+        $this->holdStatusReference(MessageReferenceData::of('beam-tenancy::status.provisioning_complete', 'Provisioning complete.'));
+        $this->emitStatus(State::Complete, 'Provisioning complete.');
     }
 
     /**
@@ -156,7 +220,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->status_run_closed = $this->status_run_id;
         $this->save();
 
-        Status::failed($this, $reason, runId: $this->status_run_id);
+        $this->emitStatus(State::Failed, $reason);
     }
 
     /**
@@ -169,7 +233,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->beginStatusRun();
         $this->save();
 
-        Status::running($this, "Applying scaffold pack '{$slug}'", ref: "pack:{$slug}", runId: $this->status_run_id);
+        $this->holdStatusReference(MessageReferenceData::of('beam-tenancy::status.pack_applying', "Applying scaffold pack ':slug'", ['slug' => $slug]));
+        $this->emitStatus(State::Running, "Applying scaffold pack '{$slug}'", "pack:{$slug}");
     }
 
     public function markPackApplyComplete(string $slug): void
@@ -177,7 +242,8 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->status_run_closed = $this->status_run_id;
         $this->save();
 
-        Status::complete($this, "Applied scaffold pack '{$slug}'", runId: $this->status_run_id);
+        $this->holdStatusReference(MessageReferenceData::of('beam-tenancy::status.pack_applied', "Applied scaffold pack ':slug'", ['slug' => $slug]));
+        $this->emitStatus(State::Complete, "Applied scaffold pack '{$slug}'");
     }
 
     public function markPackApplyFailed(string $reason): void
@@ -185,7 +251,7 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         $this->status_run_closed = $this->status_run_id;
         $this->save();
 
-        Status::failed($this, $reason, runId: $this->status_run_id);
+        $this->emitStatus(State::Failed, $reason);
     }
 
     /**
