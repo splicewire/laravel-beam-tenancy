@@ -732,7 +732,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
      *   stored prose is matched.
      * - An `activity` identity for synthetic-reporting rows: `log_name` + `event` + `properties.after.excludes`.
      */
-    protected function registerStatusPresentation(): void
+    private function registerStatusPresentation(): void
     {
         $this->callAfterResolving(MessagePresenters::class, static function (MessagePresenters $presenters): void {
             $presenters
@@ -755,7 +755,9 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 $defaults = ['provisioning_create_database' => 'Creating database', 'provisioning_migrate_database' => 'Running migrations'];
                 $ref = $row['ref'] ?? null;
 
-                return is_string($ref) && isset($defaults[$ref]) && ($row['state'] ?? null) === 'running'
+                // Only a TENANT's row proves the sentence: a foreign model's or a subjectless row with the same ref/state
+                // is authored history and stays literal (RANGE REVIEW B16-1).
+                return is_string($ref) && isset($defaults[$ref]) && ($row['state'] ?? null) === 'running' && self::isTenantSubject($row['subject_type'] ?? null)
                     ? MessageReferenceData::of('beam-tenancy::status.'.$ref, $defaults[$ref])
                     : null;
             });
@@ -774,6 +776,25 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
                 };
             });
         });
+    }
+
+    /**
+     * Whether a status row's `subject_type` is a tenant: through the morph map (an alias such as `workspace`) to a
+     * class that is, or extends, the configured `tenancy.tenant_model` or this package's Tenant. A null or empty subject
+     * is never a tenant.
+     */
+    private static function isTenantSubject(mixed $type): bool
+    {
+        if (! is_string($type) || $type === '') {
+            return false;
+        }
+        $class = Relation::getMorphedModel($type) ?? $type;
+        if (! class_exists($class)) {
+            return false;
+        }
+        $configured = config('tenancy.tenant_model');
+
+        return is_a($class, Tenant::class, true) || (is_string($configured) && $configured !== '' && is_a($class, $configured, true));
     }
 
     public function packageBooted(): void

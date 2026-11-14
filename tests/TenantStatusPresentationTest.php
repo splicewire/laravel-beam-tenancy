@@ -221,3 +221,42 @@ it('leaves any other activity row to the next presenter or its literal', functio
 
     expect($line->source)->toBe(PresentedLine::LEGACY)->and($line->text)->toBe('Something else');
 });
+
+/*
+ * RANGE REVIEW B16-1: the provisioning identity holds only for a TENANT's row. review-r1's probes, through the real
+ * StatusEventData reader: a foreign model's and a subjectless row with the same ref/state stay literal; a tenant under
+ * a morph alias renders.
+ */
+function b16StatusRow(?string $subjectType, string $description = 'Other subject authored history'): CentralActivityLog
+{
+    $row = new CentralActivityLog;
+    $row->forceFill(['id' => 42, 'log_name' => 'status', 'event' => 'running', 'subject_type' => $subjectType, 'description' => $description,
+        'properties' => ['ref' => 'provisioning_create_database', 'state' => 'running', 'progress' => null]]);
+
+    return $row;
+}
+
+it('leaves a foreign subject\'s colliding provisioning ref literal (B16-1)', function (?string $subjectType): void {
+    $line = LocaleScope::run('es', fn () => StatusEventData::fromActivity(b16StatusRow($subjectType)));
+
+    expect($line->message)->toBe('Other subject authored history');
+})->with([
+    'an unknown class' => ['App\\Models\\UnrelatedProcess'],
+    'an existing non-tenant model' => [CentralActivityLog::class],
+    'subjectless' => [null],
+    'empty subject' => [''],
+]);
+
+it('admits a real tenant under its morph alias (B16-1 control)', function (): void {
+    $prior = Illuminate\Database\Eloquent\Relations\Relation::morphMap();
+    Illuminate\Database\Eloquent\Relations\Relation::morphMap(['workspace' => Tenant::class], false);
+    try {
+        $row = b16StatusRow((new Tenant)->getMorphClass(), 'Creating database');
+
+        expect((new Tenant)->getMorphClass())->toBe('workspace')
+            ->and(LocaleScope::run('es', fn () => StatusEventData::fromActivity($row)->message))->toBe('Creando la base de datos')
+            ->and(StatusEventData::fromActivity($row)->message)->toBe('Creating database');
+    } finally {
+        Illuminate\Database\Eloquent\Relations\Relation::morphMap($prior, false);
+    }
+});
