@@ -674,6 +674,32 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
     }
 
     /**
+     * The workspace's default language, or null for none (localization 36; ruling 03 owner resolution (b)). It's an
+     * optional supported tag in the existing central `data` JSON (`default_locale`), with no column, migration or
+     * `getCustomColumns()` change. A stored value that is no longer supported reads as null.
+     */
+    public function defaultLocale(): ?string
+    {
+        return \Splicewire\Beam\Localization\Locales::supportedTag(is_string($this->default_locale ?? null) ? $this->default_locale : null);
+    }
+
+    /**
+     * Set (or, with null, clear) the workspace's default language: a supported tag only. A model method for owners,
+     * seeders and tests. **No route, action or UI writes it** (ruling 03 P1: deferred until the host's existing
+     * tenant-settings ability is named and proved). The caller saves.
+     */
+    public function setDefaultLocale(?string $locale): static
+    {
+        $tag = $locale === null || trim($locale) === '' ? null : \Splicewire\Beam\Localization\Locales::supportedTag($locale);
+        if ($locale !== null && trim($locale) !== '' && $tag === null) {
+            throw new \InvalidArgumentException("[{$locale}] is not a supported locale.");
+        }
+        $this->default_locale = $tag;
+
+        return $this;
+    }
+
+    /**
      * Set this tenant's LLM config carrier (stored in the central `data` column): a
      * preferred chat model and optional Prism provider. It sits in the model-resolution
      * cascade below an explicit Message/Thread/Agent choice and above the platform

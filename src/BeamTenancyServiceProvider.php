@@ -380,6 +380,9 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
     protected function registerTenancyContext(): void
     {
         $this->app->bind(TenancyContext::class, StanclTenancyContext::class);
+        // localization 36: beam's tenant slot reads the workspace default in tenants.data. The same supersession lane:
+        // a plain bind() over beam-core's bindIf() null adapter; this package owns the slot (ruling 03 §1).
+        $this->app->bind(\Splicewire\Beam\Localization\Contracts\TenantLocaleSource::class, \Splicewire\Beam\Tenancy\Localization\TenantDefaultLocaleSource::class);
     }
 
     /**
