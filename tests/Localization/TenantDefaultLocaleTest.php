@@ -43,6 +43,11 @@ class TenantDefaultLocaleTest extends TestCase
     {
         parent::setUp();
         config(['beam.localization.supported' => ['en', 'es', 'de', 'fr'], 'app.locale' => 'en']);
+        // B12-3: this harness boots tenancy and its listed providers, not beam-core's or accounts', so the resolver's other
+        // ports are composed HERE, test-only, exactly as production binds them: the person slot is accounts' adapter
+        // (BeamAccountsServiceProvider) and the brand slot beam's config adapter (BeamServiceProvider). No production change.
+        $this->app->bind(\Splicewire\Beam\Localization\Contracts\PersonLocaleSource::class, PreferredLocaleSource::class);
+        $this->app->bind(\Splicewire\Beam\Localization\Contracts\BrandLocaleSource::class, \Splicewire\Beam\Localization\Sources\ConfigBrandLocaleSource::class);
         $this->app->bind(TenancyContext::class, fn () => new class($this) implements TenancyContext
         {
             public function __construct(private TenantDefaultLocaleTest $test) {}
