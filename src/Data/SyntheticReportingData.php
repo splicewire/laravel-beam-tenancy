@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Tenancy\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Tenancy\Synthetic\SyntheticReporting;
 
@@ -10,6 +11,7 @@ use Splicewire\Beam\Tenancy\Synthetic\SyntheticReporting;
  * Whether reporting leaves Synthetic Tenants out right now, and why: the declared `output:` of the
  * `tenants/synthetic-reporting` operation. See {@see SyntheticReporting}.
  */
+#[TypeScript]
 class SyntheticReportingData extends BeamData
 {
     public function __construct(

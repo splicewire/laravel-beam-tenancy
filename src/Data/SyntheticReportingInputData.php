@@ -4,11 +4,13 @@ namespace Splicewire\Beam\Tenancy\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\LaravelData\Support\Validation\ValidationContext;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
 /**
  * The body of the `tenants/synthetic-reporting` operation: set the runtime override, or clear it.
  */
+#[TypeScript]
 class SyntheticReportingInputData extends BeamData
 {
     public function __construct(
