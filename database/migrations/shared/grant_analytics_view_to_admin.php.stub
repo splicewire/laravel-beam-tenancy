@@ -2,8 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\Schema;
-use Spatie\Permission\Guard;
-use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Back-fill: every existing tenant `Admin` role holds `analytics.view` (analytics-area 16, owner ruling 2026-11-10: a
@@ -29,13 +27,21 @@ use Spatie\Permission\PermissionRegistrar;
  * `php artisan migrate:refresh --path=database/migrations/2026_11_10_000100_seed_analytics_view_permission.php`), or re-run a
  * host seeder that grants it (the flagship's `PermissionsSeeder` does). Measured both ways on the flagship composition.
  *
- * Self-contained: Laravel and spatie/laravel-permission only (both the host's), so it keeps running after the package goes.
+ * Self-contained: its code names only Laravel classes, so it keeps running after the package goes (laravel-beam-commerce's
+ * RemovalResultMigrationsTest reads every stub a commerce install publishes, this one among them through the tenancy stack,
+ * and refuses any other class name). spatie/laravel-permission is the host's, and the stub reaches it by class-name string
+ * and only when it is installed; without it, both `up()` and `down()` do nothing.
  */
 return new class extends Migration
 {
     private const ROLE = 'Admin';
 
     private const PERMISSION = 'analytics.view';
+
+    /** spatie/laravel-permission's classes, by name: the stub's code must not name a class a removed package took away. */
+    private const REGISTRAR = 'Spatie\\Permission\\PermissionRegistrar';
+
+    private const GUARD = 'Spatie\\Permission\\Guard';
 
     public function up(): void
     {
@@ -44,7 +50,8 @@ return new class extends Migration
         }
         [$roleModel, $permissionModel] = $models;
 
-        $registrar = app(PermissionRegistrar::class);
+        $registrar = app(self::REGISTRAR);
+        $guard = self::GUARD;
         $teamKey = config('permission.teams') ? config('permission.column_names.team_foreign_key', 'team_id') : null;
         $previousTeam = $teamKey !== null ? $registrar->getPermissionsTeamId() : null;
 
@@ -53,7 +60,7 @@ return new class extends Migration
                 if ($teamKey !== null) {
                     $registrar->setPermissionsTeamId($role->{$teamKey});
                 }
-                $permission = $permissionModel::findOrCreate(self::PERMISSION, $role->guard_name ?? Guard::getDefaultName($permissionModel));
+                $permission = $permissionModel::findOrCreate(self::PERMISSION, $role->guard_name ?? $guard::getDefaultName($permissionModel));
                 if (! $role->permissions()->whereKey($permission->getKey())->exists()) {
                     $role->givePermissionTo($permission);
                 }
@@ -82,7 +89,7 @@ return new class extends Migration
             }
         }
 
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        app(self::REGISTRAR)->forgetCachedPermissions();
     }
 
     /** The host kept the package default: Admin holds analytics.view in `beam.tenancy.seat_role_permissions`. */
@@ -93,9 +100,16 @@ return new class extends Migration
         return is_array($map) && in_array(self::PERMISSION, (array) ($map[self::ROLE] ?? []), true);
     }
 
-    /** @return array{0: class-string, 1: class-string}|null spatie's configured models, when this connection has their tables */
+    /**
+     * @return array{0: class-string, 1: class-string}|null spatie's configured models, when spatie is installed and this
+     *                                                      connection has their tables
+     */
     private function models(): ?array
     {
+        if (! class_exists(self::REGISTRAR)) {
+            return null;
+        }
+
         $roleModel = config('permission.models.role');
         $permissionModel = config('permission.models.permission');
 
