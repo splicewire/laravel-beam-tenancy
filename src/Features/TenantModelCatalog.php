@@ -7,10 +7,11 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
 use Stancl\Tenancy\Contracts\Feature;
 use Stancl\Tenancy\Contracts\Tenant;
-use Stancl\Tenancy\Events\RevertedToCentralContext;
+use Stancl\Tenancy\Events\RevertingToCentralContext;
 use Stancl\Tenancy\Events\TenancyBootstrapped;
 use Stancl\Tenancy\Features\TenantConfig;
 use Stancl\Tenancy\Tenancy;
+use WeakMap;
 
 /**
  * TLC-03 — a tenant's curated model catalog (`llm_config.models`) **deep-merged** into
@@ -25,16 +26,24 @@ use Stancl\Tenancy\Tenancy;
  * curates nothing leaves the map byte-identical to today.
  *
  * Sibling to stancl's {@see TenantConfig}, which can only *replace* a
- * config key — mapping `llm_config.models → app.chat.models` there would wipe the floor. Instance
- * state (`$originalModels`) mirrors TenantConfig's `$originalConfig`: the feature is resolved once,
- * so the bootstrap/revert listener pair shares it across one tenant hop.
+ * config key — mapping `llm_config.models → app.chat.models` there would wipe the floor.
+ *
+ * **Reverting (config-sections 15).** The same discipline as {@see TenantRoleAlias}: it undoes only its own layer, on
+ * stancl's `RevertingToCentralContext`, so a feature applied before it (stancl's TenantConfig) restores after it, last
+ * applied, first undone. It does not listen to `RevertedToCentralContext`: a revert there could only do nothing or undo
+ * in the wrong order. It holds no config repository (HANDBACK-03): `app('config')` is resolved on every call, so an Octane request
+ * merges into and restores its own clone, the one TenantRoleAlias validates the expanded model against. What it found is
+ * kept PER repository in a WeakMap.
  */
 class TenantModelCatalog implements Feature
 {
-    /** @var array<string, mixed>|null */
-    protected ?array $originalModels = null;
+    /** @var WeakMap<Repository, array<string, mixed>> the floor found in each repository this feature merged into */
+    protected WeakMap $originalModels;
 
-    public function __construct(protected Repository $config) {}
+    public function __construct()
+    {
+        $this->originalModels = new WeakMap;
+    }
 
     public function bootstrap(Tenancy $tenancy): void
     {
@@ -42,7 +51,7 @@ class TenantModelCatalog implements Feature
             $this->setTenantModels($event->tenancy->tenant);
         });
 
-        Event::listen(RevertedToCentralContext::class, function () {
+        Event::listen(RevertingToCentralContext::class, function () {
             $this->unsetTenantModels();
         });
     }
@@ -55,19 +64,25 @@ class TenantModelCatalog implements Feature
             return;
         }
 
-        $floor = (array) $this->config->get('app.chat.models', []);
-        $this->originalModels = $floor;
+        $config = app('config');
+        $floor = (array) $config->get('app.chat.models', []);
+
+        if (! isset($this->originalModels[$config])) {
+            $this->originalModels[$config] = $floor;
+        }
 
         // Extend-only: the platform floor is spread LAST so it wins on any key collision —
         // a tenant adds new models, it can never overwrite, narrow, or hide a floor model.
-        $this->config->set('app.chat.models', array_merge($tenantModels, $floor));
+        $config->set('app.chat.models', array_merge($tenantModels, $floor));
     }
 
     public function unsetTenantModels(): void
     {
-        if ($this->originalModels !== null) {
-            $this->config->set('app.chat.models', $this->originalModels);
-            $this->originalModels = null;
+        $config = app('config');
+
+        if (isset($this->originalModels[$config])) {
+            $config->set('app.chat.models', $this->originalModels[$config]);
+            unset($this->originalModels[$config]);
         }
     }
 }
