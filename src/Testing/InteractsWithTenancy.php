@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Spatie\Permission\Models\Role as SpatieRole;
+use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\Domains\NullDomainProvider;
 use Splicewire\Beam\Tenancy\Features\TenantModelCatalog;
 use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
@@ -14,9 +15,9 @@ use Splicewire\Beam\Tenancy\PermissionsTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\PostgreSQLSchemaManager;
 use Splicewire\Beam\Tenancy\Tenant;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
-use Stancl\Tenancy\Contracts\SyncMaster;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
+use Stancl\Tenancy\Contracts\SyncMaster;
 use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Events;
 use Stancl\Tenancy\Features\TenantConfig;
@@ -127,6 +128,9 @@ trait InteractsWithTenancy
         return [
             DatabaseTenancyBootstrapper::class,
             CacheTenancyBootstrapper::class,
+            // config-sections 07: the tenant tier of beam's Override Ladder, after the database and cache switch. Inert
+            // where the shared config migration has not run (no store, no layer).
+            ConfigLadderTenancyBootstrapper::class,
             QueueTenancyBootstrapper::class,
             PermissionsTenancyBootstrapper::class,
         ];

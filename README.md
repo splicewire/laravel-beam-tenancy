@@ -29,7 +29,13 @@ carries the **designated system tenant** resolver it started life as.
   the satellite Org ladder and "tier" is billing.
 - **Bootstrappers** — `PermissionsTenancyBootstrapper` re-scopes spatie permissions to the active
   tenant and flushes the registrar cache on every switch; `CircuitTenancyBootstrapper` does the
-  equivalent for circuits.
+  equivalent for circuits. `ConfigLadderTenancyBootstrapper` applies the tenant tier of laravel-beam's
+  config Override Ladder (ADR-0245) inside a tenant hop and reverts it to the central effective values
+  at the end. Like the others, the HOST lists it in its own `config/tenancy.php` `bootstrappers` (this
+  package never writes that list): AFTER `DatabaseTenancyBootstrapper` and `CacheTenancyBootstrapper`,
+  because a tenant's overrides live in its own storage. It is inert until the shared config migration
+  has run. Who may read and write a workspace's tier through `beam-config` is the host's
+  `beam.core.config_overrides.tenant_ability` (null by default: nobody).
 - **Ports** — DNS, edge, capability-overlay and domain-provision contracts, each with a null-object
   default so a host binds only what it needs. A sitemap base-URL resolver returns the active
   tenant's domain, falling back to the configured default when tenancy is absent.
