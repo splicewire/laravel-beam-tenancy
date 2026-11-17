@@ -60,6 +60,11 @@ class TestCase extends Orchestra
             // packageBooted APPENDS to `data-schemas.strategies`, and with that key unset the append would replace the
             // generator's default strategies (localization 37 leg finding; a beam follow-up on the 12/13 list).
             \Schemastud\DataSchemas\LaravelDataSchemasServiceProvider::class,
+            // config-sections 07: rushing/laravel-versioning, a hard require of laravel-beam that every host auto-discovers.
+            // Testbench does not, and laravel-beam's ConfigOverrideStore (the config Override Ladder's store, which the
+            // tenant tier and its bootstrapper build) takes its VersionStore binding, so without this line every
+            // config-ladder case dies at setUp with "Target [VersionStore] is not instantiable" (TOTS 07 Step 1).
+            \Rushing\Versioning\VersioningServiceProvider::class,
             \Splicewire\Beam\BeamServiceProvider::class,
             BeamTenancyServiceProvider::class,
         ];

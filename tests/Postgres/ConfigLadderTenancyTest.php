@@ -4,6 +4,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Config\ConfigSectionRegistry;
 use Splicewire\Beam\Config\Overrides\ConfigOverlay;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
@@ -19,6 +20,7 @@ use Splicewire\Beam\Tenancy\Tests\Postgres\PostgresTestCase;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
+use Stancl\Tenancy\Tenancy;
 
 /**
  * config-sections ticket 07 (beam-tenancy half): a tenant override applies inside the hop and reverts, under stancl's
@@ -34,6 +36,19 @@ use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
  * Every override is written through laravel-beam's store inside the tenant's own hop, the path the `beam-config` ops take.
  */
 beforeEach(function () {
+    // Isolation (TOTS 07 Step 1): the harness drops `pool_*` schemas per test (PostgresTestCase::defineDatabaseMigrations)
+    // but not the `tenant_*` schemas a SCHEMA tenant creates, and the database reset deletes the tenants' ROWS only, so the
+    // next test's cs07Schema('alpha') hit "duplicate schema tenant_alpha". Drop them on central first, as server2's are.
+    foreach (DB::connection('central')->select("select schema_name from information_schema.schemata where schema_name like 'tenant\\_%'") as $row) {
+        DB::connection('central')->statement('drop schema "'.$row->schema_name.'" cascade');
+    }
+
+    // stancl's provider binds the Tenant contract to the current tenant; this harness boots no stancl provider and
+    // wireTenancyEvents() binds only the Tenancy singleton. Unbound, stancl's tenant() helper answers null everywhere: the
+    // QueueTenancyBootstrapper's payload (tenant()->getTenantKey()) cannot tag a job with its tenant and a job cannot see
+    // its tenant, which is what a real host never does (TOTS 07 Step 1, the two-tenant worker case).
+    app()->bind(Stancl\Tenancy\Contracts\Tenant::class, fn ($app) => $app[Tenancy::class]->tenant);
+
     // stancl's queue listeners (the harness boots no stancl provider).
     QueueTenancyBootstrapper::__constructStatic($this->app);
 
@@ -229,9 +244,19 @@ it('keeps two tenants\' jobs apart on one worker: each runs with its own tier, a
     cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'dark']]);
     cs07TenantPublish($alpha, [['pointer' => '/review', 'op' => 'set', 'value' => true], ['pointer' => '/theme', 'op' => 'set', 'value' => 'pink']]);
 
-    $alpha->run(fn () => ReadsLadderConfigJob::dispatch('a-1'));
-    $bravo->run(fn () => ReadsLadderConfigJob::dispatch('b-1'));
-    $alpha->run(fn () => ReadsLadderConfigJob::dispatch('a-2'));
+    // A STATEMENT closure, not `fn () => X::dispatch()`: dispatch() returns a PendingDispatch that queues the job only
+    // in its __destruct. An arrow function RETURNS it, and stancl's Tenant::run() holds that return value across
+    // tenancy()->end() (TenantRun.php:18-33), so the job would be queued from CENTRAL, untagged (TOTS 07 Step 1, :243).
+    // As a statement, it is destroyed inside the tenant's hop, as a real request's dispatch is.
+    $alpha->run(function () {
+        ReadsLadderConfigJob::dispatch('a-1');
+    });
+    $bravo->run(function () {
+        ReadsLadderConfigJob::dispatch('b-1');
+    });
+    $alpha->run(function () {
+        ReadsLadderConfigJob::dispatch('a-2');
+    });
     ReadsLadderConfigJob::dispatch('central');
 
     // ONE worker process (this one), four jobs in order: A, B after A, A again, then a central job.
@@ -292,7 +317,9 @@ it('lets an operator lock stop a published tenant override at the next hop, and 
     tenancy()->initialize($alpha);
     try {
         expect(fn () => app(ConfigOverrideStore::class)->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]))
-            ->toThrow(Splicewire\Beam\Config\Overrides\ConfigOverrideRefusal::class, '/review is locked by the operator: Review policy is set by the operator.');
+            // ConfigOverrideRefusal::because() answers a ValidationException (the 422 an op returns); the refusal class is
+            // a factory, not a Throwable.
+            ->toThrow(ValidationException::class, '/review is locked by the operator: Review policy is set by the operator.');
     } finally {
         tenancy()->end();
     }
@@ -312,9 +339,154 @@ it('holds an operator lock on a child against a published tenant parent at the n
 
     tenancy()->initialize($alpha);
     try {
-        expect(config('cs07.group'))->toBe(['review' => false, 'label' => 'Tenant label'], 'the locked child is central, its sibling the tenant\'s');
+        // Values, not key order: the cut child is inherited back AFTER the tenant's kept sibling (TOTS 07 Step 1).
+        expect(config('cs07.group'))->toEqual(['review' => false, 'label' => 'Tenant label'], 'the locked child is central, its sibling the tenant\'s');
     } finally {
         tenancy()->end();
     }
     expect(config('cs07.group'))->toBe(['review' => false, 'label' => 'base']);
+});
+
+/** Row count and an md5 of every row of central's store and version tables, in a stable order. */
+function cs07CentralFingerprint(): array
+{
+    $fingerprint = [];
+
+    foreach (['config_scopes', 'config_overrides', 'versions'] as $name) {
+        $rows = DB::connection('central')->select('select md5(t::text) as h from public.'.Beam::table($name).' t order by 1');
+        $fingerprint[$name] = [count($rows), md5(implode(',', array_map(fn (object $row): string => $row->h, $rows)))];
+    }
+
+    return $fingerprint;
+}
+
+/**
+ * root ab22fd59 (laravel-beam's tenant-target guard): the REAL hazard is Postgres's `<tenant schema>,public` search path. A
+ * schema tenant whose own schema lacks the store's table (a host that ran the central migrate but not tenants:migrate)
+ * would resolve the store's unqualified queries to central's `public` OPERATOR table. The guard refuses the write, and
+ * central is byte-untouched.
+ */
+it('refuses a tenant write that would fall through ,public into central\'s operator table, leaving central byte-untouched', function () {
+    cs07Bootstrappers();
+    cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'dark']]);
+
+    // A schema tenant WITHOUT the shared config migration in its own schema.
+    $alpha = Tenant::create(['id' => 'alpha', 'name' => 'Alpha', 'slug' => 'alpha']);
+    $alpha->database()->makeCredentials();
+    $alpha->database()->manager()->createDatabase($alpha);
+    $alpha = Tenant::find('alpha');
+    $before = cs07CentralFingerprint();
+
+    tenancy()->initialize($alpha);
+    try {
+        // The fall-through is real: the tenant connection's unqualified read reaches central's operator rows.
+        expect(DB::table(Beam::table('config_scopes'))->where('section', 'cs07')->count())->toBe(1, 'the tenant connection sees central\'s row through ,public');
+
+        $store = app(ConfigOverrideStore::class);
+        expect($store->tier())->toBe(ConfigTier::Tenant);
+
+        // Every WRITE is refused (review 05:34Z: discardDraft and restore too).
+        foreach ([
+            'saveDraft' => fn () => $store->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]),
+            'publish' => fn () => $store->publish('cs07'),
+            'discardDraft' => fn () => $store->discardDraft('cs07'),
+            'restore' => fn () => $store->restore('cs07', 'any'),
+        ] as $method => $write) {
+            expect($write)->toThrow(ValidationException::class, "lacks the store's tables `".Beam::table('config_scopes').'`');
+        }
+
+        // And every READ finds nothing, never central's operator scope, history or layers as the tenant's own.
+        expect($store->scope('cs07'))->toBeNull('the tenant tier finds no scope through ,public')
+            ->and($store->versionsOf('cs07'))->toBe([], 'nor the operator\'s history')
+            ->and($store->publishedLayers())->toBe([])
+            ->and($store->publishedToken())->toBe('none');
+    } finally {
+        tenancy()->end();
+    }
+
+    expect(cs07CentralFingerprint())->toBe($before, 'central\'s store is byte-untouched')
+        ->and(config('cs07.review'))->toBeFalse('central reads no tenant value');
+
+    // The same tenant, once migrated, writes into its OWN schema.
+    cs07MigrateTenant($alpha);
+    cs07TenantPublish($alpha, [['pointer' => '/review', 'op' => 'set', 'value' => true]]);
+    expect(cs07Inside($alpha)['review'])->toBeTrue()
+        ->and(cs07CentralFingerprint())->toBe($before, 'and its write still never touched central');
+});
+
+/**
+ * Review 05:40Z: the same server reached a SECOND way. A pool configured onto central's own server through another host
+ * spelling, whose pool schema is missing (a failed provision), puts the tenant session in central's database with
+ * current_schema() falling back to `public`. Its server ADDRESS may differ from central's (localhost as ::1, a socket),
+ * which an address comparison would miss. The guard compares database + schema only, and refuses.
+ */
+it('refuses a tenant whose session lands in central\'s database and public schema through a second host spelling', function () {
+    cs07Bootstrappers();
+    cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'dark']]);
+
+    $central = config('database.connections.central');
+    config()->set('database.connections.cs07_alias', array_merge($central, ['host' => ($central['host'] ?? '') === 'localhost' ? '127.0.0.1' : 'localhost']));
+    config()->set('beam.tenancy.pooled.pools.alias', ['connection' => 'cs07_alias']);
+
+    $alpha = cs07Pooled('alpha', 'alias');
+    DB::connection('central')->statement('drop schema if exists "'.$alpha->poolSchema().'" cascade');
+    $before = cs07CentralFingerprint();
+    $centralAddress = DB::connection('central')->selectOne('select inet_server_addr()::text as a')->a;
+
+    tenancy()->initialize($alpha);
+    try {
+        $session = DB::selectOne('select current_database() as d, current_schema() as s, inet_server_addr()::text as a');
+        expect([$session->d, $session->s])->toBe([DB::connection('central')->selectOne('select current_database() as d')->d, 'public'], 'the tenant session sits in central\'s database and public schema');
+        fwrite(STDERR, "\n[cs07-alias] central address ".var_export($centralAddress, true).', tenant address '.var_export($session->a, true).($session->a === $centralAddress ? ' (same on this host; an address check would also have caught it)' : ' (DIFFERENT: an address comparison would have missed it)')."\n");
+
+        $store = app(ConfigOverrideStore::class);
+        expect(fn () => $store->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]))
+            ->toThrow(ValidationException::class, "resolves to central's own database and schema");
+        expect($store->scope('cs07'))->toBeNull()
+            ->and($store->publishedLayers())->toBe([]);
+    } finally {
+        tenancy()->end();
+    }
+
+    expect(cs07CentralFingerprint())->toBe($before, 'central\'s store is byte-untouched');
+});
+
+/**
+ * Review 05:46Z: a host that does NOT list ConfigLadderTenancyBootstrapper (so the overlay never applies or reverts).
+ * stancl's own TenancyInitialized / TenancyEnded still clear the store's cached tenant-target answer (laravel-beam's
+ * provider listens to them), so after an end + re-initialize of the same tenant whose table was dropped, the next write is
+ * refused rather than falling through ,public to central.
+ */
+it('clears a cached ok on stancl\'s own tenancy transitions with no ladder bootstrapper listed', function () {
+    cs07Bootstrappers();
+    config()->set('tenancy.bootstrappers', [DatabaseTenancyBootstrapper::class, CacheTenancyBootstrapper::class]);
+    cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'dark']]);
+    $alpha = cs07Schema('alpha');
+    $before = cs07CentralFingerprint();
+
+    tenancy()->initialize($alpha);
+    expect(app(ConfigOverrideStore::class)->tenantTargetProblem())->toBeNull('ok, and cached for this frame');
+    tenancy()->end();
+
+    DB::connection('central')->statement('drop table "'.$alpha->database()->getName().'".'.Beam::table('config_scopes').' cascade');
+
+    tenancy()->initialize($alpha);
+    try {
+        expect(fn () => app(ConfigOverrideStore::class)->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]))
+            ->toThrow(ValidationException::class, "lacks the store's tables `".Beam::table('config_scopes').'`');
+    } finally {
+        tenancy()->end();
+    }
+
+    expect(cs07CentralFingerprint())->toBe($before, 'central\'s store is byte-untouched');
+});
+
+it('refuses the tenant tier with no tenant active on the central connection', function () {
+    cs07Bootstrappers();
+    cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'dark']]);
+    $before = cs07CentralFingerprint();
+
+    expect(fn () => app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]))
+        ->toThrow(ValidationException::class, 'no tenant is active');
+    expect(cs07CentralFingerprint())->toBe($before);
 });

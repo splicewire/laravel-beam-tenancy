@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Config\Repository;
 use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\Features\TenantModelCatalog;
 use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
@@ -8,6 +9,7 @@ use Splicewire\Beam\Tenancy\Testing\InteractsWithTenancy;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
 use Stancl\Tenancy\Contracts\Tenant as TenantContract;
 use Stancl\Tenancy\Events;
+use Stancl\Tenancy\Features\TenantConfig;
 use Stancl\Tenancy\Listeners;
 use Stancl\Tenancy\Tenancy;
 
@@ -69,4 +71,71 @@ it('keeps the role alias running after the catalog merge with the ladder bootstr
 
     expect(config('app.chat.models'))->toBe(['floor-model' => ['label' => 'Floor']])
         ->and(config('app.chat.default_model'))->toBe('floor-model');
+});
+
+/*
+ * Ticket 15's AC4 variant deferred to 07 (lead 11:36Z): 15 landed on main, so its role-alias revert and boot-time order
+ * refusal now run beside 07's ladder bootstrapper. With the bootstrapper listed AND stancl's TenantConfig mapping
+ * preferred_model, as the flagship lists the features (TenantConfig, TenantModelCatalog, TenantRoleAlias), the boot does
+ * not refuse, the role expands in the hop, central's default model is restored after it, and the next tenant sees the
+ * floor. The shared harness's own feature list (InteractsWithTenancy) passes the same order check.
+ */
+it('keeps a tenant\'s role alias out of the central config with the ladder bootstrapper AND stancl TenantConfig listed', function () {
+    $features = [TenantConfig::class, TenantModelCatalog::class, TenantRoleAlias::class];
+    config()->set('tenancy.bootstrappers', [ConfigLadderTenancyBootstrapper::class]);
+    config()->set('tenancy.features', $features);
+    $previousMap = TenantConfig::$storageToConfigMap;
+    TenantConfig::$storageToConfigMap = ['llm_config.preferred_model' => 'app.chat.default_model'];
+
+    try {
+        // 15's boot-time order check passes for the flagship order (it throws a LogicException otherwise).
+        foreach ($features as $feature) {
+            app($feature)->bootstrap(tenancy());
+        }
+
+        $role = Tenant::create(['id' => 'acme', 'slug' => 'acme', 'llm_config' => [
+            'preferred_model' => 'fast',
+            'provider' => 'acme-llm',
+            'models' => ['tenant-only-model' => ['label' => 'Tenant only']],
+            'roles' => ['acme-llm' => ['fast' => 'tenant-only-model']],
+        ]]);
+        $plain = Tenant::create(['id' => 'plain', 'slug' => 'plain', 'llm_config' => ['provider' => 'acme-llm']]);
+
+        tenancy()->initialize($role);
+        expect(config('app.chat.default_model'))->toBe('tenant-only-model', 'inside: the role expands after the catalog merge');
+        tenancy()->end();
+
+        expect(config('app.chat.default_model'))->toBe('floor-model', 'central after the hop: no leak with the ladder bootstrapper listed')
+            ->and(config('app.chat.models'))->toBe(['floor-model' => ['label' => 'Floor']]);
+
+        tenancy()->initialize($plain);
+        expect(config('app.chat.default_model'))->toBe('floor-model', 'the next tenant sees the floor');
+        tenancy()->end();
+    } finally {
+        TenantConfig::$storageToConfigMap = $previousMap;
+    }
+});
+
+it('lists the features in the order 15\'s boot check requires, in the shared harness', function () {
+    // InteractsWithTenancy::defineTenancyConfig() writes the shared harness's tenancy config; capture it in a scratch
+    // repository and boot the role alias against that feature list (15 refuses at boot if TenantConfig comes after it).
+    $harness = new class
+    {
+        use InteractsWithTenancy;
+
+        public function define(Repository $config): void
+        {
+            $this->defineTenancyConfig(['config' => $config]);
+        }
+    };
+    $scratch = new Repository;
+    $harness->define($scratch);
+    $features = (array) $scratch->get('tenancy.features');
+
+    expect(array_search(TenantConfig::class, $features, true))
+        ->toBeLessThan(array_search(TenantRoleAlias::class, $features, true))
+        ->and(array_search(ConfigLadderTenancyBootstrapper::class, (array) $scratch->get('tenancy.bootstrappers'), true))->not->toBeFalse();
+
+    config()->set('tenancy.features', $features);
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
 });
