@@ -6949,16 +6949,19 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/splicewire/laravel-beam-analytics.git",
-                "reference": "14cf808c70bd3eb411958fba3fe7bdbc3437ddcc"
+                "reference": "ecc42fcb667701c0b897e4aa29d29ca6d98a7382"
             },
             "require": {
                 "illuminate/console": "^11.0|^12.0|^13.0",
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
                 "illuminate/support": "^11.0|^12.0|^13.0",
                 "illuminate/view": "^11.0|^12.0|^13.0",
-                "php": "^8.2",
+                "php": "^8.3",
                 "rushing/laravel-doctor": "*",
-                "spatie/laravel-package-tools": "^1.16"
+                "rushing/laravel-popcorn": "*",
+                "schemastud/laravel-frame": "*",
+                "spatie/laravel-package-tools": "^1.16",
+                "splicewire/laravel-beam": "*"
             },
             "require-dev": {
                 "laravel/pint": "^1.0",
@@ -6972,6 +6975,20 @@
                 "laravel": {
                     "providers": [
                         "Splicewire\\Beam\\Analytics\\BeamAnalyticsServiceProvider"
+                    ]
+                },
+                "package-topology": {
+                    "because": "analytics is a beam-tier package: its Analytics section is built from particles and Data classes, so it depends DOWN on beam core, frame and popcorn (ADR-0242). beam-ux requires this package to carry the tag on every site, so an edge back to beam-ux would be a cycle, and the composed tower host and the satellite tier sit above it. Packages fill its registries by naming them as strings, which needs no edge in either direction.",
+                    "mustRequire": [
+                        "splicewire/laravel-beam",
+                        "schemastud/laravel-frame",
+                        "rushing/laravel-popcorn"
+                    ],
+                    "mustNotRequire": [
+                        "splicewire/laravel-beam-ux",
+                        "splicewire/tower",
+                        "splicewire/laravel-satellite",
+                        "splicewire/laravel-tower-*"
                     ]
                 },
                 "merge-plugin": {
@@ -7001,8 +7018,8 @@
             "license": [
                 "MIT"
             ],
-            "description": "Provider-agnostic, opt-in, fail-closed frontend analytics for beam satellites. Two Blade directives (@beamAnalyticsHead / @beamAnalyticsBody) render the analytics markup for every configured-and-keyed provider at once and nothing when a provider is keyless, the env is disallowed, or a provider name is unknown. GTM ships as the first adapter; a `splicewire:beam:analytics:doctor` command verifies directive placement and env/config coherence. Never reads a service-account key.",
-            "time": "2026-10-30T12:58:05+00:00"
+            "description": "Analytics for beam hosts: the frontend tag, a declared Event Vocabulary, and the registries an Analytics section is filled from. Two Blade directives (@beamAnalyticsHead / @beamAnalyticsBody) render the markup for every configured-and-keyed provider at once and nothing when a provider is keyless, the env is disallowed, or a provider name is unknown. GTM and GA4 ship as adapters; a `splicewire:beam:analytics:doctor` command verifies directive placement and env/config coherence. A beam-tier package: it requires beam, frame and popcorn, and never beam-ux. Never reads a service-account key.",
+            "time": "2026-11-14T12:41:30+00:00"
         },
         {
             "name": "splicewire/laravel-beam-provision",
