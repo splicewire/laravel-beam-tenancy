@@ -6726,7 +6726,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/splicewire/laravel-beam.git",
-                "reference": "b4d84e41e3049bbd30778027c061748b7e369f19"
+                "reference": "1ba7951afbd2dc25578204fce22033d3efac3f2b"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -6865,7 +6865,7 @@
                 "MIT"
             ],
             "description": "The schema-driven-CMS core: composes the open schema foundation (schemastud/laravel-data-schemas + schemastud/laravel-frame) and the open versioning foundation (rushing/laravel-versioning) into a schema-typed, snapshot-versioned, migrate-on-read BeamParticle. Depends DOWN on the open foundations (the ADR-0092 direction, paid→open); per ADR-0156 that now includes schemastud/laravel-frame — the agnostic resource-scaffolding rung — so beam natively implements Frame's FrameResourceHandler port (chain: splicewire/beam → schemastud/frame → schemastud/data-schemas, monotonic, no cycle). Also the runtime home of the host-hook registries (webhook / sitemap / doctor), the realm registry, and the particle resource declarations. The media arm (medialibrary + the media model traits + media table) was extracted DOWN into splicewire/laravel-beam-media (HTTP-03 / ADR-0178); base beam no longer requires medialibrary and does NOT require beam-media (no cycle). Headless = no editor SURFACE running; Frame's scaffolding may be present-but-inert. No Beam model is minted; beam is a substrate, not an instance.",
-            "time": "2026-11-17T07:48:53+00:00"
+            "time": "2026-11-17T13:26:13+00:00"
         },
         {
             "name": "splicewire/laravel-beam-accounts",
