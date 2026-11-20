@@ -4737,11 +4737,13 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/stephenr85/laravel-permission-cascade.git",
-                "reference": "07090593d8820f5f5c5c9e83e14a317c1c136d56"
+                "reference": "76be9e3b147ffce91c08b0db146abb7b2130fada"
             },
             "require": {
+                "illuminate/auth": "^11.0|^12.0|^13.0",
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
                 "illuminate/database": "^11.0|^12.0|^13.0",
+                "illuminate/http": "^11.0|^12.0|^13.0",
                 "illuminate/support": "^11.0|^12.0|^13.0",
                 "php": "^8.2",
                 "spatie/laravel-permission": "^6.0"
@@ -4798,7 +4800,7 @@
                 "policy",
                 "spatie"
             ],
-            "time": "2026-09-25T04:31:34+00:00"
+            "time": "2026-11-20T15:56:45+00:00"
         },
         {
             "name": "rushing/laravel-pipeline-registry",
@@ -5232,7 +5234,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/stephenr85/php-popcorn.git",
-                "reference": "011c15ca2c89d65f28970646ba61e40a16c89b0b"
+                "reference": "2eafd5549a79f64fead8b32dc26eecda86235f40"
             },
             "require": {
                 "php": "^8.3",
@@ -5291,7 +5293,7 @@
                 "registry",
                 "strategy"
             ],
-            "time": "2026-11-09T17:38:11+00:00"
+            "time": "2026-11-19T11:54:17+00:00"
         },
         {
             "name": "schemastud/laravel-data-schemas",
@@ -5299,7 +5301,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/schemastud/laravel-data-schemas.git",
-                "reference": "a704f5fe058a4f80f3acce77689a68671273971f"
+                "reference": "fcd54d8f92e0de87c834288b0e1f0db5ae4b321f"
             },
             "require": {
                 "galbar/jsonpath": "^3.0",
@@ -5383,7 +5385,7 @@
                 "spatie",
                 "validation"
             ],
-            "time": "2026-11-12T22:11:47+00:00"
+            "time": "2026-11-14T21:46:28+00:00"
         },
         {
             "name": "schemastud/laravel-frame",
@@ -5391,7 +5393,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/schemastud/laravel-frame.git",
-                "reference": "8ad341d6007b9793b449bc065142200acc5c3375"
+                "reference": "65841a07105444236fea22162ffbeb794fbe8749"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -5452,7 +5454,7 @@
                 "MIT"
             ],
             "description": "The batteries-UX backend rung for schema-driven admin editors: the resource-definition registry (ResourceDefinition), the #[Widget] -> x-widget projector, #[ReadOnlyField], and a served GET /frame/manifest. Sits one level above a filter-schema controller; resolves a resource key to its whole editor wiring. Pairs with @schemastud/frame on the JS side.",
-            "time": "2026-11-14T18:31:49+00:00"
+            "time": "2026-11-20T11:19:18+00:00"
         },
         {
             "name": "schemastud/laravel-json-ns",
@@ -6726,7 +6728,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/splicewire/laravel-beam.git",
-                "reference": "1ba7951afbd2dc25578204fce22033d3efac3f2b"
+                "reference": "968b20799584234805bc1562189e714520a96730"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -6754,7 +6756,8 @@
                 "spatie/laravel-package-tools": "^1.16",
                 "spatie/laravel-schemaless-attributes": "*",
                 "spatie/laravel-sluggable": "^3.5|^4.0",
-                "spatie/typescript-transformer": "^3.0"
+                "spatie/typescript-transformer": "^3.0",
+                "symfony/yaml": "^6.4|^7.0|^8.0"
             },
             "require-dev": {
                 "larastan/larastan": "^3.9",
@@ -6865,7 +6868,7 @@
                 "MIT"
             ],
             "description": "The schema-driven-CMS core: composes the open schema foundation (schemastud/laravel-data-schemas + schemastud/laravel-frame) and the open versioning foundation (rushing/laravel-versioning) into a schema-typed, snapshot-versioned, migrate-on-read BeamParticle. Depends DOWN on the open foundations (the ADR-0092 direction, paid→open); per ADR-0156 that now includes schemastud/laravel-frame — the agnostic resource-scaffolding rung — so beam natively implements Frame's FrameResourceHandler port (chain: splicewire/beam → schemastud/frame → schemastud/data-schemas, monotonic, no cycle). Also the runtime home of the host-hook registries (webhook / sitemap / doctor), the realm registry, and the particle resource declarations. The media arm (medialibrary + the media model traits + media table) was extracted DOWN into splicewire/laravel-beam-media (HTTP-03 / ADR-0178); base beam no longer requires medialibrary and does NOT require beam-media (no cycle). Headless = no editor SURFACE running; Frame's scaffolding may be present-but-inert. No Beam model is minted; beam is a substrate, not an instance.",
-            "time": "2026-11-17T13:26:13+00:00"
+            "time": "2026-11-20T13:21:24+00:00"
         },
         {
             "name": "splicewire/laravel-beam-accounts",
@@ -10814,6 +10817,82 @@
                 }
             ],
             "time": "2026-04-18T13:18:21+00:00"
+        },
+        {
+            "name": "symfony/yaml",
+            "version": "v8.1.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/yaml.git",
+                "reference": "faabdbe998e8c5c599dceffa27aa265b185c0736"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/yaml/zipball/faabdbe998e8c5c599dceffa27aa265b185c0736",
+                "reference": "faabdbe998e8c5c599dceffa27aa265b185c0736",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.4.1",
+                "symfony/polyfill-ctype": "^1.8"
+            },
+            "conflict": {
+                "symfony/console": "<7.4"
+            },
+            "require-dev": {
+                "symfony/console": "^7.4|^8.0",
+                "yaml/yaml-test-suite": "*"
+            },
+            "bin": [
+                "Resources/bin/yaml-lint"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Yaml\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Loads and dumps YAML files",
+            "homepage": "https://symfony.com",
+            "support": {
+                "source": "https://github.com/symfony/yaml/tree/v8.1.2"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-07-22T15:42:13+00:00"
         },
         {
             "name": "tijsverkoyen/css-to-inline-styles",
@@ -15130,82 +15209,6 @@
             "time": "2026-10-07T08:21:34+00:00"
         },
         {
-            "name": "symfony/yaml",
-            "version": "v8.1.2",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/symfony/yaml.git",
-                "reference": "faabdbe998e8c5c599dceffa27aa265b185c0736"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/symfony/yaml/zipball/faabdbe998e8c5c599dceffa27aa265b185c0736",
-                "reference": "faabdbe998e8c5c599dceffa27aa265b185c0736",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=8.4.1",
-                "symfony/polyfill-ctype": "^1.8"
-            },
-            "conflict": {
-                "symfony/console": "<7.4"
-            },
-            "require-dev": {
-                "symfony/console": "^7.4|^8.0",
-                "yaml/yaml-test-suite": "*"
-            },
-            "bin": [
-                "Resources/bin/yaml-lint"
-            ],
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Symfony\\Component\\Yaml\\": ""
-                },
-                "exclude-from-classmap": [
-                    "/Tests/"
-                ]
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Fabien Potencier",
-                    "email": "fabien@symfony.com"
-                },
-                {
-                    "name": "Symfony Community",
-                    "homepage": "https://symfony.com/contributors"
-                }
-            ],
-            "description": "Loads and dumps YAML files",
-            "homepage": "https://symfony.com",
-            "support": {
-                "source": "https://github.com/symfony/yaml/tree/v8.1.2"
-            },
-            "funding": [
-                {
-                    "url": "https://symfony.com/sponsor",
-                    "type": "custom"
-                },
-                {
-                    "url": "https://github.com/fabpot",
-                    "type": "github"
-                },
-                {
-                    "url": "https://github.com/nicolas-grekas",
-                    "type": "github"
-                },
-                {
-                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
-                    "type": "tidelift"
-                }
-            ],
-            "time": "2026-07-22T15:42:13+00:00"
-        },
-        {
             "name": "ta-tikoma/phpunit-architecture-test",
             "version": "0.8.7",
             "source": {
@@ -15374,10 +15377,15 @@
     "aliases": [],
     "minimum-stability": "dev",
     "stability-flags": {
+        "rushing/laravel-permission-cascade": 20,
         "rushing/laravel-popcorn": 20,
         "rushing/laravel-postgres-rls": 20,
         "rushing/laravel-schema-convergence": 20,
-        "rushing/php-graphine": 20
+        "rushing/php-graphine": 20,
+        "rushing/php-popcorn": 20,
+        "schemastud/laravel-data-schemas": 20,
+        "schemastud/laravel-frame": 20,
+        "splicewire/laravel-beam": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,
