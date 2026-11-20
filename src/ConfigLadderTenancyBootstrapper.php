@@ -34,6 +34,9 @@ class ConfigLadderTenancyBootstrapper implements TenancyBootstrapper
     {
         app(ConfigOverlay::class)->sync();
         app(ConfigTenantOverlay::class)->apply();
+        // config-sections 09: the cutover source lays the tenant's legacy `tenants.data` values where it has no
+        // published tenant-tier entry yet; a no-op unless the host names legacy keys.
+        app(TenantDataOverrideSource::class)->lay($tenant);
     }
 
     public function revert(): void

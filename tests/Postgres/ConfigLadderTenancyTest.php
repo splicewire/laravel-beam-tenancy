@@ -490,3 +490,83 @@ it('refuses the tenant tier with no tenant active on the central connection', fu
         ->toThrow(ValidationException::class, 'no tenant is active');
     expect(cs07CentralFingerprint())->toBe($before);
 });
+
+/*
+ * config-sections ticket 09: the CUTOVER source (TenantDataOverrideSource). A host names legacy `tenants.data` keys; until
+ * they are imported into tenant-tier rows, each tenant's legacy values apply in its hop as if published, through the same
+ * restrictions, and revert with the hop.
+ */
+function cs09Legacy(): void
+{
+    config()->set('beam.tenancy.config_overrides.legacy_data', [
+        'legacy_theme' => ['root' => 'cs07', 'pointer' => '/theme'],
+        'legacy.review' => ['root' => 'cs07', 'pointer' => '/review'],
+        'legacy_group' => ['root' => 'cs07', 'pointer' => '/group', 'entries' => true],
+    ]);
+}
+
+function cs09WithData(Tenant $tenant, array $data): Tenant
+{
+    foreach ($data as $key => $value) {
+        $tenant->setAttribute($key, $value);
+    }
+    $tenant->save();
+
+    return Tenant::find($tenant->getTenantKey());
+}
+
+/** @return array{review: mixed, theme: mixed, label: mixed} */
+function cs09Inside(Tenant $tenant): array
+{
+    tenancy()->initialize($tenant);
+
+    try {
+        return ['review' => config('cs07.review'), 'theme' => config('cs07.theme'), 'label' => config('cs07.group.label')];
+    } finally {
+        tenancy()->end();
+    }
+}
+
+it('lays a tenant\'s legacy tenants.data values in its hop until they are published, and reverts them', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'legacy_group' => ['label' => 'from legacy']]);
+    $bravo = cs07Schema('bravo');
+
+    expect(cs09Inside($alpha))->toBe(['review' => true, 'theme' => 'neon', 'label' => 'from legacy'], "alpha's legacy values apply, a map's entries one by one")
+        ->and(cs09Inside($bravo))->toBe(['review' => false, 'theme' => 'light', 'label' => 'base'], 'bravo has no legacy data')
+        ->and([config('cs07.review'), config('cs07.theme'), config('cs07.group.label')])->toBe([false, 'light', 'base'], 'central never sees them')
+        ->and(cs09Inside($alpha)['theme'])->toBe('neon', 'a second hop re-applies');
+});
+
+it('lets a published tenant row win over the legacy value at the same pointer, and keeps the other legacy values', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true]]);
+    cs07TenantPublish($alpha, [['pointer' => '/theme', 'op' => 'set', 'value' => 'pink']]);
+
+    expect(cs09Inside($alpha))->toBe(['review' => true, 'theme' => 'pink', 'label' => 'base'])
+        ->and(config('cs07.theme'))->toBe('light', 'revert restores the published layer and the legacy layer together');
+});
+
+it('stops a legacy value at an operator lock, as it stops a published one', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true]]);
+    expect(cs09Inside($alpha)['review'])->toBeTrue();
+
+    app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->lock('cs07', '/review', 'Review policy is set by the operator.');
+
+    expect(cs09Inside($alpha))->toBe(['review' => false, 'theme' => 'neon', 'label' => 'base'], 'the lock takes the key away; the unlocked legacy value stays');
+});
+
+it('takes a null or absent legacy value as no override, and a host naming no legacy keys lays nothing', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => null]);
+    expect(cs09Inside($alpha))->toBe(['review' => false, 'theme' => 'light', 'label' => 'base']);
+
+    config()->set('beam.tenancy.config_overrides.legacy_data', []);
+    $bravo = cs09WithData(cs07Schema('bravo'), ['legacy_theme' => 'neon']);
+    expect(cs09Inside($bravo)['theme'])->toBe('light', 'no map, no cutover');
+});

@@ -86,6 +86,19 @@ return [
         'cache_store' => env('BEAM_TENANCY_SYNTHETIC_CACHE_STORE'),
     ],
 
+    /*
+     * CONFIG OVERRIDES: the tenant tier's CUTOVER from legacy `tenants.data` (config-sections ticket 09).
+     *
+     * `legacy_data` names the tenant data a host used to map into config (stancl's `TenantConfig`, beam-tenancy's
+     * `TenantModelCatalog`): a `tenants.data` path (dot notation) => ['root' => <a registered config section root>,
+     * 'pointer' => <a JSON pointer in it>], with 'entries' => true for a map whose entries each become an override.
+     * Until `splicewire:beam:tenancy:import-config-overrides` copies them into tenant-tier rows,
+     * TenantDataOverrideSource lays them in the tenant hop wherever the tenant has no published entry. Empty: no cutover.
+     */
+    'config_overrides' => [
+        'legacy_data' => [],
+    ],
+
     'system_tenant' => [
         'slug' => env('SPLICEWIRE_SYSTEM_TENANT_SLUG', 'system'),
         'name' => 'System',
