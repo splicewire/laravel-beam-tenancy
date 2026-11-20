@@ -809,6 +809,12 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->registerStatusPresentation();
         $this->bindTenantModel();
 
+        // config-sections 09: the synthetic-reporting toggle is an operator-tier live key of the Override Ladder; every
+        // publish of it (Config area, op, command) is audited by the scope observer.
+        $this->app->make(\Splicewire\Beam\Config\ConfigSectionRegistry::class)
+            ->section(Synthetic\SyntheticReportingSection::class, owner: 'splicewire/laravel-beam-tenancy', by: self::class);
+        Synthetic\SyntheticReporting::observePublishes();
+
         // Whoever accepts a workspace invitation is seated: the tenant mirror and their tier's role (WorkspaceSeats).
         \Splicewire\Beam\Accounts\Models\Invitation::observe(SeatAcceptedInvitations::class);
         $this->bootStanclEventMap();

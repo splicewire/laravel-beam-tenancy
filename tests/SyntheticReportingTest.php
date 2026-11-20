@@ -3,6 +3,12 @@
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as AuthUser;
 use Illuminate\Support\Facades\Cache;
+use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
+use Splicewire\Beam\Config\Overrides\ConfigOverrideScope;
+use Splicewire\Beam\Config\Overrides\ConfigOverlay;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -26,8 +32,10 @@ use Stancl\Tenancy\Tenancy;
 
 /**
  * The reporting toggle: `Tenant::reportable()` drops Synthetic Tenants only while
- * `SyntheticReporting::excludes()` is true, and an operator can flip that at runtime through the cache, with
- * config untouched (no redeploy), with every flip on the central activity trail.
+ * `SyntheticReporting::excludes()` is true. config-sections 09: an operator flips it through the OPERATOR tier of the
+ * Override Ladder (`beam.tenancy.synthetic` `/exclude_from_reporting`, a live key), from the Config area, the op or the
+ * command, with no redeploy, and every flip, whichever surface made it, is on the central activity trail. The retired
+ * cache override is honoured read-only until the first operator-tier flip.
  */
 beforeEach(function () {
     config(['cache.default' => 'array']);
@@ -46,6 +54,26 @@ beforeEach(function () {
         $table->uuid('batch_uuid')->nullable();
         $table->timestamps();
     });
+
+    // The Override Ladder's store (laravel-beam's shared stubs), on the default and central connections.
+    foreach ([null, 'central'] as $connection) {
+        $default = DB::getDefaultConnection();
+        if ($connection !== null) {
+            DB::setDefaultConnection($connection);
+        }
+        try {
+            foreach (['create_beam_versions_table', 'create_beam_config_overrides_table', 'create_beam_config_locks_table'] as $stub) {
+                if (! Schema::hasTable(Beam::table($stub === 'create_beam_versions_table' ? 'versions' : ($stub === 'create_beam_config_locks_table' ? 'config_locks' : 'config_scopes')))) {
+                    (require dirname(__DIR__).'/vendor/splicewire/laravel-beam/database/migrations/shared/'.$stub.'.php.stub')->up();
+                }
+            }
+        } finally {
+            DB::setDefaultConnection($default);
+        }
+    }
+    foreach ([ConfigOverrideStore::class, ConfigOverlay::class] as $singleton) {
+        app()->forgetInstance($singleton);
+    }
 
     Tenant::create(['id' => 'real-a', 'name' => 'Real A']);
     Tenant::create(['id' => 'real-b', 'name' => 'Real B', 'synthetic' => false]);
@@ -93,32 +121,72 @@ it('drops synthetic tenants from reportable() while the toggle is on', function 
     expect(reportableIds())->toBe(['real-a', 'real-b']);
 });
 
-it('flips through the cache with config untouched, and the next query sees it', function () {
+it('flips through the operator tier of the ladder, live, and the next query sees it', function () {
     $reporting = app(SyntheticReporting::class);
 
-    $reporting->set(true);
+    $state = $reporting->set(true);
 
-    // Config still says include: the flip is the cache override, not a redeploy.
-    expect(config('beam.tenancy.synthetic.exclude_from_reporting'))->toBeFalse()
-        ->and(cache()->store()->get(SyntheticReporting::CACHE_KEY))->toBeTrue()
+    // The flip is an operator-tier override published through the ladder (a live key): the effective config follows.
+    expect($state->source)->toBe('override')
+        ->and($reporting->override())->toBeTrue()
+        ->and($state->configured)->toBeFalse('the deploy-time answer is unchanged: no redeploy')
+        ->and(config('beam.tenancy.synthetic.exclude_from_reporting'))->toBeTrue()
         ->and(reportableIds())->toBe(['real-a', 'real-b']);
 
     // A fresh instance reads the same answer: nothing is held in the object.
     app()->forgetInstance(SyntheticReporting::class);
     expect(app(SyntheticReporting::class)->excludes())->toBeTrue();
 
-    // An explicit include beats an exclude in config.
-    config(['beam.tenancy.synthetic.exclude_from_reporting' => true]);
-    $reporting->set(false);
-    expect(reportableIds())->toBe(allTenantIds())
+    // An explicit include.
+    expect($reporting->set(false)->excludes)->toBeFalse()
+        ->and(reportableIds())->toBe(allTenantIds())
         ->and($reporting->state()->source)->toBe('override');
 
     // Clearing hands the answer back to config.
     $state = $reporting->set(null);
     expect($state->override)->toBeNull()
         ->and($state->source)->toBe('config')
-        ->and($state->excludes)->toBeTrue()
+        ->and($state->excludes)->toBeFalse()
+        ->and(reportableIds())->toBe(allTenantIds());
+});
+
+it('honours a value the retired cache override left, read-only, until the first flip clears it', function () {
+    cache()->store()->forever(SyntheticReporting::CACHE_KEY, true);
+    $reporting = app(SyntheticReporting::class);
+
+    expect($reporting->state()->source)->toBe('legacy-cache')
+        ->and($reporting->excludes())->toBeTrue()
         ->and(reportableIds())->toBe(['real-a', 'real-b']);
+
+    $reporting->set(false);
+    expect(cache()->store()->get(SyntheticReporting::CACHE_KEY))->toBeNull('the flip clears the retired key')
+        ->and($reporting->state()->source)->toBe('override')
+        ->and(reportableIds())->toBe(allTenantIds());
+});
+
+it('audits a flip published straight through beam-config, with no SyntheticReporting call', function () {
+    $operator = SyntheticReportingOperator::create(['id' => (string) Str::uuid(), 'email' => 'op@beam.test']);
+    $this->actingAs($operator);
+
+    // The publish is the store saving the scope MODEL with a new published_version (the observer's assumption).
+    $saves = 0;
+    ConfigOverrideScope::updated(function (ConfigOverrideScope $scope) use (&$saves): void {
+        if ($scope->section === SyntheticReporting::ROOT && $scope->wasChanged('published_version')) {
+            $saves++;
+        }
+    });
+
+    $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator);
+    $store->saveDraft(SyntheticReporting::ROOT, [['pointer' => SyntheticReporting::POINTER, 'op' => 'set', 'value' => true]]);
+    $store->publish(SyntheticReporting::ROOT);
+
+    $row = CentralActivityLog::query()->where('log_name', SyntheticReporting::LOG_NAME)->sole();
+    expect($saves)->toBe(1, 'publish saved the scope model, firing updated')
+        ->and($row->event)->toBe('set')
+        ->and($row->causer_id)->toBe((string) $operator->getKey())
+        ->and($row->properties['before']['excludes'])->toBeFalse()
+        ->and($row->properties['after']['excludes'])->toBeTrue()
+        ->and($row->properties['after']['source'])->toBe('override');
 });
 
 it('logs every flip to the central activity trail, before and after', function () {
@@ -140,23 +208,11 @@ it('logs every flip to the central activity trail, before and after', function (
         ->and($rows[1]->properties['after']['source'])->toBe('config');
 });
 
-it('sees a central override from inside a tenant, where the cache manager is tenant-tagged', function () {
-    // A persistent store, as a host has. stancl's bootstrapper builds a NEW cache manager, so an `array` store
-    // (in-memory per manager) would lose every key at the swap whatever the toggle did; a database or Redis
-    // store reads the same backend from either manager. The package pins the database store to central.
-    Schema::connection('testing')->create('cache', function (Blueprint $table): void {
-        $table->string('key')->primary();
-        $table->mediumText('value');
-        $table->integer('expiration');
-    });
-    config(['cache.default' => 'database']);
-    Cache::forgetDriver('database');
-
+it('sees the operator override from inside a tenant, where the cache manager is tenant-tagged', function () {
     app(SyntheticReporting::class)->set(true);
 
     // Stand up stancl's tenant cache exactly as its bootstrapper does at a host: the harness does not boot
     // stancl's TenancyServiceProvider, so the bootstrapper is run by hand against a current tenant.
-    // stancl's provider makes Tenancy a singleton and binds the current-tenant contract; mirror both.
     $tenant = Tenant::find('real-a');
     app()->singleton(Tenancy::class);
     app()->bind(TenantContract::class, fn ($app) => $app[Tenancy::class]->tenant);
@@ -166,13 +222,9 @@ it('sees a central override from inside a tenant, where the cache manager is ten
     $bootstrapper->bootstrap($tenant);
 
     try {
-        // CONTROL: every proxied call is now tagged with the tenant. The database store cannot tag at all, so a
-        // proxied read does not even reach the key.
+        // CONTROL: the cache manager is now the tenant-tagged one; the answer no longer depends on a cache.
         expect(app('cache'))->toBeInstanceOf(TenantCacheManager::class)
-            ->and(fn () => Cache::get(SyntheticReporting::CACHE_KEY))->toThrow(BadMethodCallException::class);
-
-        // The toggle reads a named store, which the tenant manager does not tag.
-        expect(app(SyntheticReporting::class)->excludes())->toBeTrue()
+            ->and(app(SyntheticReporting::class)->excludes())->toBeTrue()
             ->and(reportableIds())->toBe(['real-a', 'real-b']);
     } finally {
         $bootstrapper->revert();
