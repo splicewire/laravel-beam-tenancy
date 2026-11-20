@@ -71,13 +71,13 @@ return [
      * reads like one with customers. Financial-truth reads go through `Tenant::reportable()`, which drops synthetic
      * tenants only while `SyntheticReporting::excludes()` is true.
      *
-     * `exclude_from_reporting` is the deploy-time answer. An operator can override it at runtime, with no redeploy,
-     * through the `tenants/synthetic-reporting` operation or `splicewire:beam:tenancy:synthetic-reporting`. The
-     * override lives in the cache, so it holds across requests and workers, and is logged to the central activity
-     * trail. Clearing the cache (`cache:clear`) clears the override and puts this default back.
+     * `exclude_from_reporting` is the deploy-time answer. An operator overrides it at runtime, with no redeploy, on the
+     * OPERATOR tier of beam's Override Ladder (config-sections 09: a live key of the `beam.tenancy.synthetic` section):
+     * through the Config area, the `tenants/synthetic-reporting` operation or `splicewire:beam:tenancy:synthetic-reporting`.
+     * Every flip, from any of them, is logged to the central activity trail. Clearing the override puts this default back.
      *
-     * `cache_store` names the store the override lives in; null means the default store. Use a shared, persistent
-     * store: an `array` store forgets the override at the end of the request.
+     * `cache_store` names the store the RETIRED cache override lived in (null: the default store). A value an older
+     * release left there is honoured read-only until the first operator-tier publish of the section, which removes it.
      *
      * The env name matches the flagship's older `config/synthetic.php`, so a host that already sets it keeps its value.
      */
@@ -91,9 +91,12 @@ return [
      *
      * `legacy_data` names the tenant data a host used to map into config (stancl's `TenantConfig`, beam-tenancy's
      * `TenantModelCatalog`): a `tenants.data` path (dot notation) => ['root' => <a registered config section root>,
-     * 'pointer' => <a JSON pointer in it>], with 'entries' => true for a map whose entries each become an override.
-     * Until `splicewire:beam:tenancy:import-config-overrides` copies them into tenant-tier rows,
-     * TenantDataOverrideSource lays them in the tenant hop wherever the tenant has no published entry. Empty: no cutover.
+     * 'pointer' => <a JSON pointer in it>], with 'entries' => true for a map whose entries each become an override. A
+     * map declared `merge: Extend` (a catalog) needs 'entries' => true: one `set` of the whole map collides with the
+     * platform's entries and is always dropped.
+     * Until `splicewire:beam:tenancy:import-config-overrides` copies them into tenant-tier rows and marks the tenant
+     * imported, TenantDataOverrideSource lays them in the tenant hop wherever the tenant has no published entry; from
+     * then on it lays nothing for that tenant. Empty: no cutover.
      */
     'config_overrides' => [
         'legacy_data' => [],

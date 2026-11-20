@@ -33,10 +33,9 @@ class ConfigLadderTenancyBootstrapper implements TenancyBootstrapper
     public function bootstrap(Tenant $tenant): void
     {
         app(ConfigOverlay::class)->sync();
+        // config-sections 09: apply() also runs the overlay's contributors, beam-tenancy's cutover source among them, which
+        // lays the tenant's legacy `tenants.data` values (here and on every refresh after a tenant publish).
         app(ConfigTenantOverlay::class)->apply();
-        // config-sections 09: the cutover source lays the tenant's legacy `tenants.data` values where it has no
-        // published tenant-tier entry yet; a no-op unless the host names legacy keys.
-        app(TenantDataOverrideSource::class)->lay($tenant);
     }
 
     public function revert(): void

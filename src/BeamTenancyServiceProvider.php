@@ -815,6 +815,14 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             ->section(Synthetic\SyntheticReportingSection::class, owner: 'splicewire/laravel-beam-tenancy', by: self::class);
         Synthetic\SyntheticReporting::observePublishes();
 
+        // config-sections 09 (review S1, B1): the cutover source is a CONTRIBUTOR to laravel-beam's tenant tier, so it runs
+        // in every apply() (the hop, and the refresh after a tenant publish mid-request) and never on an unreadable tenant
+        // store. Registered on the overlay instance, whenever and however often it is (re)built: no rebinding.
+        $this->callAfterResolving(
+            \Splicewire\Beam\Config\Overrides\ConfigTenantOverlay::class,
+            fn ($overlay) => $overlay->contribute(fn (array $layers): array => $this->app->make(TenantDataOverrideSource::class)->contribute($layers)),
+        );
+
         // Whoever accepts a workspace invitation is seated: the tenant mirror and their tier's role (WorkspaceSeats).
         \Splicewire\Beam\Accounts\Models\Invitation::observe(SeatAcceptedInvitations::class);
         $this->bootStanclEventMap();

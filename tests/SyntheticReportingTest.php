@@ -189,6 +189,47 @@ it('audits a flip published straight through beam-config, with no SyntheticRepor
         ->and($row->properties['after']['source'])->toBe('override');
 });
 
+it('S6: a flip through beam-config retires the legacy cache value, so a later unset never brings it back', function () {
+    cache()->store()->forever(SyntheticReporting::CACHE_KEY, true);
+    $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator);
+
+    $store->saveDraft(SyntheticReporting::ROOT, [['pointer' => SyntheticReporting::POINTER, 'op' => 'set', 'value' => false]]);
+    $store->publish(SyntheticReporting::ROOT);
+    expect(cache()->store()->get(SyntheticReporting::CACHE_KEY))->toBeNull('the beam-config publish removed the retired key');
+
+    $store->saveDraft(SyntheticReporting::ROOT, [['pointer' => SyntheticReporting::POINTER, 'op' => 'unset']]);
+    $store->publish(SyntheticReporting::ROOT);
+    app(ConfigOverlay::class)->recheckNow();
+    app(ConfigOverlay::class)->sync();
+
+    expect(app(SyntheticReporting::class)->state()->source)->toBe('config', 'never legacy-cache')
+        ->and(app(SyntheticReporting::class)->excludes())->toBeFalse();
+});
+
+it('S6: a clear through set(null) is audited as cleared, with the after-state of config, while a legacy cache value existed', function () {
+    cache()->store()->forever(SyntheticReporting::CACHE_KEY, true);
+    app(SyntheticReporting::class)->set(true);
+    cache()->store()->forever(SyntheticReporting::CACHE_KEY, true);
+
+    app(SyntheticReporting::class)->set(null);
+
+    $last = CentralActivityLog::query()->where('log_name', SyntheticReporting::LOG_NAME)->orderByDesc('id')->first();
+    expect($last->event)->toBe('cleared')
+        ->and($last->properties['after']['override'])->toBeNull()
+        ->and($last->properties['after']['source'])->toBe('config');
+});
+
+it('S7: a flip rolled back on the scope\'s own connection writes no audit row', function () {
+    // The operator tier on a second connection (the Release "copy of default" case): its transaction rolls back.
+    $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->on('testing');
+    DB::connection('testing')->beginTransaction();
+    $store->saveDraft(SyntheticReporting::ROOT, [['pointer' => SyntheticReporting::POINTER, 'op' => 'set', 'value' => true]]);
+    $store->publish(SyntheticReporting::ROOT);
+    DB::connection('testing')->rollBack();
+
+    expect(CentralActivityLog::query()->where('log_name', SyntheticReporting::LOG_NAME)->count())->toBe(0, 'a flip that never happened is never on the trail');
+});
+
 it('logs every flip to the central activity trail, before and after', function () {
     $operator = SyntheticReportingOperator::create(['id' => (string) Str::uuid(), 'email' => 'op@beam.test']);
 

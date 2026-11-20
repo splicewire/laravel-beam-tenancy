@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Tenancy\Synthetic;
 
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Splicewire\Beam\Config\Overrides\ConfigOverlay;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideScope;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
@@ -58,9 +59,21 @@ class SyntheticReporting
             $before = static::$pendingBefore;
             static::$pendingBefore = null;
 
-            if ($before !== null) {
-                static::recordPublish($scope, $before);
+            if ($before === null || $scope->section !== self::ROOT || ! $scope->wasChanged('published_version')) {
+                return;
             }
+
+            // Review S6: ANY publish of this root retires the legacy cache value (beam-config, a Release, the op or the
+            // command), before the after-state is read, so a later unset can never bring an old cached answer back.
+            app(static::class)->forgetLegacy();
+            $causer = static::$flipCauser ?? auth()->user();
+
+            // Review S7: on the scope's OWN connection, after its outermost transaction commits: the after-state is then
+            // the committed one (a Release publishing through a second connection included), and a rolled-back flip
+            // writes no audit row. With no transaction open it runs at once.
+            DB::connection($scope->getConnectionName())->afterCommit(
+                fn () => static::recordPublish($scope, $before, $causer),
+            );
         });
     }
 
@@ -116,7 +129,7 @@ class SyntheticReporting
             static::$flipCauser = null;
         }
 
-        $this->legacyStore()->forget(self::CACHE_KEY);
+        $this->forgetLegacy();
         $overlay = app(ConfigOverlay::class);
         $overlay->recheckNow();
         $overlay->sync();
@@ -144,15 +157,13 @@ class SyntheticReporting
      * ConfigOverrideStore::publish() moves the scope's `published_version` on the Eloquent model, so its `updated`
      * event marks a publish. For this section's scope it records the before and after effective answer.
      */
-    public static function recordPublish(ConfigOverrideScope $scope, SyntheticReportingData $before): void
+    public static function recordPublish(ConfigOverrideScope $scope, SyntheticReportingData $before, ?Model $causer = null): void
     {
-        if ($scope->section !== self::ROOT || ! $scope->wasChanged('published_version')) {
+        if ($scope->section !== self::ROOT) {
             return;
         }
 
-        $reporting = app(static::class);
-        $after = $reporting->state();
-        $causer = static::$flipCauser ?? auth()->user();
+        $after = app(static::class)->state();
 
         CentralActivityLog::create([
             'log_name' => self::LOG_NAME,
@@ -169,6 +180,16 @@ class SyntheticReporting
                 'after' => $after->toArray(),
             ],
         ]);
+    }
+
+    /** Retire the cache override's value: from now on the operator tier, or config, answers. */
+    public function forgetLegacy(): void
+    {
+        try {
+            $this->legacyStore()->forget(self::CACHE_KEY);
+        } catch (Throwable) {
+            // No cache store to forget from: nothing was cached there.
+        }
     }
 
     /** The retired cache override, read-only (a value an older release left), or null. */

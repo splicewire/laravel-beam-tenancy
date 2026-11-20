@@ -6,6 +6,7 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
 use Splicewire\Beam\Tenancy\Tenant as AppTenant;
+use Splicewire\Beam\Config\Events\TenantConfigLayerLaid;
 use Stancl\Tenancy\Contracts\Feature;
 use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Events\RevertingToCentralContext;
@@ -60,6 +61,24 @@ class TenantRoleAlias implements Feature
 
         Event::listen(TenancyBootstrapped::class, function (TenancyBootstrapped $event) {
             $this->expandRole($event->tenancy->tenant);
+        });
+
+        // config-sections 09 (review S3): the tenant tier is RE-laid mid-hop (laravel-beam's operator re-sync lifts the
+        // layer, writes the operator tier and lays it again; a tenant publish re-applies it), which hands the raw role back.
+        // Expand again on every lay. Inside the hop's own bootstrap the catalog may not be merged yet, so a role that
+        // resolves to nothing here is left for the loud TenancyBootstrapped expansion above.
+        Event::listen(TenantConfigLayerLaid::class, function (TenantConfigLayerLaid $event): void {
+            $tenant = tenancy()->tenant;
+
+            if ($tenant === null || ! $event->touches('app.chat')) {
+                return;
+            }
+
+            try {
+                $this->expandRole($tenant);
+            } catch (\InvalidArgumentException) {
+                // Not resolvable against this layer yet: TenancyBootstrapped expands (or refuses) after the catalog.
+            }
         });
 
         Event::listen(RevertingToCentralContext::class, function () {

@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Tenancy\Commands;
 
 use Illuminate\Console\Command;
 use Splicewire\Beam\Config\ConfigSectionRegistry;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideEntry;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Config\Overrides\ConfigTenantOverlay;
@@ -22,9 +24,17 @@ use Throwable;
  *   entry the platform already holds, is reported as not importable and never written.
  * - **Idempotent:** a pointer the tenant already has a published entry for (at or above it) is left alone, so a re-run
  *   reports `already present`.
- * - **Per tenant:** `imported (n)`, `already present`, or `nothing to import`, plus any not-importable pointers.
- * - **Never prints a value**, secret or not: pointers and counts only. A key the section declares secret is stored
- *   encrypted by the store and served redacted, like any secret override.
+ * - **Never publishes a tenant's unfinished draft** (review S4): a root with a saved, unpublished draft is skipped and
+ *   reported (`draft pending, skipped`). Otherwise the legacy values are saved as their OWN new version and exactly that
+ *   version is published.
+ * - **It ends the cutover per tenant** (review B1): a tenant it finished (no root skipped) is marked
+ *   ({@see TenantDataOverrideSource::IMPORTED_MARKER}), and the cutover source lays nothing for it from then on, so an
+ *   override the tenant later unsets stays unset. A tenant with a skipped root is NOT marked: its legacy values keep
+ *   applying until a re-run finishes it.
+ * - **Per tenant:** `imported (n)`, `already present`, or `nothing to import`, plus any not-importable or skipped pointers.
+ * - **Never prints a value**, secret or not: pointers and counts only, and on a failure the exception's CLASS, never its
+ *   message (review S5: a query exception's message carries the SQL and its bindings). A key the section declares secret
+ *   is stored encrypted by the store and served redacted, like any secret override.
  *
  * An OWNER/runbook deploy step (lead 06:23Z, Q5): run against a live database only by the owner.
  */
@@ -53,9 +63,15 @@ class ImportTenantConfigOverridesCommand extends Command
         foreach ($tenants as $tenant) {
             try {
                 $this->line($this->importOne($tenant, $source, $sections, $map, (bool) $this->option('dry-run')));
+            } catch (ValidationException $e) {
+                // A store refusal (ConfigOverrideRefusal::because()): its message is the store's own sentence about a root
+                // or pointer, written to be shown to whoever wrote it, never a value.
+                $failed = true;
+                $this->error("{$tenant->getTenantKey()}: failed (refused: {$e->getMessage()})");
             } catch (Throwable $e) {
                 $failed = true;
-                $this->error("{$tenant->getTenantKey()}: failed ({$e->getMessage()})");
+                $this->error("{$tenant->getTenantKey()}: failed (".$e::class.'; nothing printed from it, see the application log)');
+                Log::error('[beam-tenancy] import-config-overrides failed for a tenant.', ['tenant' => $tenant->getTenantKey(), 'exception' => $e::class]);
             }
         }
 
@@ -71,13 +87,14 @@ class ImportTenantConfigOverridesCommand extends Command
             return "{$tenant->getTenantKey()}: nothing to import";
         }
 
-        tenancy()->initialize($tenant);
+        $imported = 0;
+        $present = 0;
+        $refused = [];
+        $skipped = [];
 
         try {
+            tenancy()->initialize($tenant);
             $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
-            $imported = 0;
-            $present = 0;
-            $refused = [];
 
             foreach ($legacy as $root => $entries) {
                 $registered = $sections->get($root);
@@ -90,6 +107,14 @@ class ImportTenantConfigOverridesCommand extends Command
 
                 $scope = $store->scope($root);
                 $published = $scope === null ? [] : array_keys($store->publishedLayer($scope));
+
+                if ($scope !== null && $scope->head_version !== null && $scope->head_version !== $scope->published_version) {
+                    // The tenant has a saved draft it has not published: publishing ours would publish theirs too.
+                    $skipped[] = "{$root} (draft pending, skipped)";
+
+                    continue;
+                }
+
                 $fresh = [];
 
                 foreach ($entries as $pointer => $entry) {
@@ -119,15 +144,22 @@ class ImportTenantConfigOverridesCommand extends Command
                     continue;
                 }
 
-                $store->saveDraft($root, array_values(array_map(
+                $ours = $store->saveDraft($root, array_values(array_map(
                     fn (ConfigOverrideEntry $entry): array => ['pointer' => $entry->pointer, 'op' => 'set', 'value' => $entry->value],
                     $kept,
                 )), 'import-config-overrides');
-                $store->publish($root);
+                // Exactly the version just saved (no draft was pending, so it holds only the published layer plus ours).
+                $store->publishVersion($root, $ours->head_version);
                 $imported += count($kept);
             }
         } finally {
             tenancy()->end();
+        }
+
+        if (! $dry && $skipped === []) {
+            // Central: the tenant model lives on the central connection, outside the hop.
+            $tenant->setAttribute(TenantDataOverrideSource::IMPORTED_MARKER, now()->toIso8601String());
+            $tenant->save();
         }
 
         $status = match (true) {
@@ -136,7 +168,9 @@ class ImportTenantConfigOverridesCommand extends Command
             default => 'nothing to import',
         };
 
-        return "{$tenant->getTenantKey()}: {$status}".($refused === [] ? '' : '; not importable: '.implode(', ', $refused));
+        return "{$tenant->getTenantKey()}: {$status}"
+            .($refused === [] ? '' : '; not importable: '.implode(', ', $refused))
+            .($skipped === [] ? '' : '; '.implode(', ', $skipped).'; not marked imported');
     }
 
     /** @param  list<string|int>  $published */

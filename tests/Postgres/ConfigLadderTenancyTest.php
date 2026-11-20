@@ -14,6 +14,10 @@ use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\Tenant;
+use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
+use Splicewire\Beam\Tenancy\TenantDataOverrideSource;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\ChatLadderSection;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\FailingImportStore;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\LadderSection;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\LegacySecretSection;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\ReadsLadderConfigJob;
@@ -640,4 +644,149 @@ it('writes nothing on a dry run, and reports a legacy value an operator lock sto
 
     app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->lock('cs07', '/review', 'Review policy is set by the operator.');
     expect(cs09Import())->toContain('alpha: imported (1); not importable: cs07/review');
+});
+
+/*
+ * config-sections ticket 09, review REVISE (22f92af6; lead rulings): B1, S1, S2, S3, S4, S5. Fake values only (F14).
+ */
+it('B1: ends the cutover at the import: an override the tenant unsets after it stays unset, never the legacy value', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'legacy_group' => ['label' => 'from legacy']]);
+
+    expect(cs09Import())->toContain('alpha: imported (3)');
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::imported($alpha))->toBeTrue('the import marks the tenant it finished');
+
+    // The tenant resets two keys in the Config area: an unset of each, published.
+    cs07TenantPublish($alpha, [['pointer' => '/theme', 'op' => 'unset'], ['pointer' => '/group/label', 'op' => 'unset']]);
+
+    expect(cs09Inside($alpha))->toBe(['review' => true, 'theme' => 'light', 'label' => 'base'], 'central for the unset keys, the published value for the rest; the legacy data still says neon');
+});
+
+it('B1: an imported tenant whose store later cannot be read runs on central, never on its stale legacy values', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true]]);
+    expect(cs09Import())->toContain('alpha: imported (2)');
+
+    // Its store's tables are gone (a broken restore, a half-migrated schema): the tier reads nothing published.
+    foreach (['config_scopes', 'config_overrides', 'versions'] as $name) {
+        DB::connection('central')->statement('drop table if exists "tenant_alpha"."'.Beam::table($name).'" cascade');
+    }
+
+    expect(cs09Inside(Tenant::find('alpha')))->toBe(['review' => false, 'theme' => 'light', 'label' => 'base'], 'central; the legacy data still says neon');
+});
+
+it('S1: keeps the other legacy values after a tenant publishes one key mid-hop', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true]]);
+
+    tenancy()->initialize($alpha);
+    try {
+        expect([config('cs07.theme'), config('cs07.review')])->toBe(['neon', true]);
+        $store = app(ConfigOverrideStore::class);
+        $store->saveDraft('cs07', [['pointer' => '/theme', 'op' => 'set', 'value' => 'pink']]);
+        $store->publish('cs07');
+
+        expect([config('cs07.theme'), config('cs07.review')])->toBe(['pink', true], 'the published key, and the legacy review still applies for the rest of the request');
+    } finally {
+        tenancy()->end();
+    }
+    expect([config('cs07.theme'), config('cs07.review')])->toBe(['light', false]);
+});
+
+it('S2: skips a legacy value its schema rejects, or that cannot be written at all, and the hop still starts', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    config()->set('beam.tenancy.config_overrides.legacy_data.legacy_through_scalar', ['root' => 'cs07', 'pointer' => '/theme', 'entries' => true]);
+    $alpha = cs09WithData(cs07Schema('alpha'), [
+        'legacy_theme' => ['not' => 'a string'],            // the schema says string
+        'legacy' => ['review' => true],                      // valid, kept
+        'legacy_through_scalar' => ['x' => 'through a scalar'], // /theme/x below central's string 'light'
+    ]);
+
+    expect(cs09Inside($alpha))->toBe(['review' => true, 'theme' => 'light', 'label' => 'base'])
+        ->and(config('cs07.theme'))->toBe('light');
+});
+
+it('S3: keeps the role expanded when laravel-beam\'s operator re-sync re-lays the tenant layer mid-hop', function () {
+    cs07Bootstrappers();
+    app(ConfigSectionRegistry::class)->section(ChatLadderSection::class, owner: 'host');
+    config()->set('app.chat', ['default_model' => 'floor-model', 'models' => ['floor-model' => ['label' => 'Floor']]]);
+    config()->set('beam.tenancy.config_overrides.legacy_data', [
+        'llm_config.preferred_model' => ['root' => 'app.chat', 'pointer' => '/default_model'],
+        'llm_config.models' => ['root' => 'app.chat', 'pointer' => '/models', 'entries' => true],
+    ]);
+    // 09's feature list: no stancl TenantConfig, no TenantModelCatalog.
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $acme = cs09WithData(cs07Schema('acme'), ['llm_config' => [
+        'preferred_model' => 'fast',
+        'provider' => 'acme-llm',
+        'models' => ['tenant-only-model' => ['label' => 'Tenant only']],
+        'roles' => ['acme-llm' => ['fast' => 'tenant-only-model']],
+    ]]);
+
+    tenancy()->initialize($acme);
+    try {
+        expect(config('app.chat.default_model'))->toBe('tenant-only-model', 'the laddered role expands at the hop');
+
+        // An operator publish elsewhere moves the token; the next sync (the JobProcessing listener's) lifts the tenant
+        // layer, writes the operator tier and lays the layer again.
+        cs07OperatorPublish([['pointer' => '/theme', 'op' => 'set', 'value' => 'operator-teal']]);
+        app(ConfigOverlay::class)->recheckNow();
+        app(ConfigOverlay::class)->sync();
+
+        expect(config('cs07.theme'))->toBe('operator-teal', 'CONTROL: the re-sync really ran mid-hop')
+            ->and(config('app.chat.default_model'))->toBe('tenant-only-model', 'never the raw role after the re-lay');
+    } finally {
+        tenancy()->end();
+    }
+    expect(config('app.chat.default_model'))->toBe('floor-model', 'central after the hop');
+});
+
+it('S4: never publishes a tenant\'s pending draft: that root is skipped and reported, and the tenant is not marked', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon']);
+
+    // The tenant admin saved a draft and has not published it.
+    tenancy()->initialize($alpha);
+    try {
+        app(ConfigOverrideStore::class)->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => true]]);
+    } finally {
+        tenancy()->end();
+    }
+
+    expect(cs09Import())->toContain('alpha: nothing to import; cs07 (draft pending, skipped); not marked imported')
+        ->and(TenantDataOverrideSource::imported(Tenant::find('alpha')))->toBeFalse();
+
+    tenancy()->initialize($alpha);
+    try {
+        $store = app(ConfigOverrideStore::class);
+        $scope = $store->scope('cs07');
+        expect($scope->published_version)->toBeNull('nothing published: the draft stays theirs')
+            ->and($scope->head_version)->not->toBeNull();
+    } finally {
+        tenancy()->end();
+    }
+    expect(cs09Inside(Tenant::find('alpha'))['theme'])->toBe('neon', 'unmarked: the legacy value still applies');
+});
+
+it('S5: a failed import prints the exception class, never its message or a value', function () {
+    cs07Bootstrappers();
+    cs09Legacy();
+    cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon-cs09-leak-probe']);
+
+    $failing = app()->make(FailingImportStore::class);
+    app()->instance(ConfigOverrideStore::class, $failing);
+
+    $exit = Artisan::call('splicewire:beam:tenancy:import-config-overrides');
+    $out = Artisan::output();
+
+    expect($exit)->toBe(1)
+        ->and($out)->toContain('alpha: failed (Illuminate\\Database\\QueryException')
+        ->and($out)->not->toContain('neon-cs09-leak-probe')
+        ->and($out)->not->toContain('insert into');
 });
