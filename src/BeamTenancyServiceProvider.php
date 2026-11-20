@@ -818,9 +818,15 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         // config-sections 09 (review S1, B1): the cutover source is a CONTRIBUTOR to laravel-beam's tenant tier, so it runs
         // in every apply() (the hop, and the refresh after a tenant publish mid-request) and never on an unreadable tenant
         // store. Registered on the overlay instance, whenever and however often it is (re)built: no rebinding.
+        // Review S-c: a laravel-beam below the hook (e333345) has no contribute(); a skewed host lock then degrades to "no
+        // cutover" (the legacy values are not laid) instead of failing every request at the overlay's first resolution.
         $this->callAfterResolving(
             \Splicewire\Beam\Config\Overrides\ConfigTenantOverlay::class,
-            fn ($overlay) => $overlay->contribute(fn (array $layers): array => $this->app->make(TenantDataOverrideSource::class)->contribute($layers)),
+            function ($overlay): void {
+                if (method_exists($overlay, 'contribute')) {
+                    $overlay->contribute(fn (array $layers): array => $this->app->make(TenantDataOverrideSource::class)->contribute($layers));
+                }
+            },
         );
 
         // Whoever accepts a workspace invitation is seated: the tenant mirror and their tier's role (WorkspaceSeats).

@@ -97,6 +97,8 @@ return [
      * Until `splicewire:beam:tenancy:import-config-overrides` copies them into tenant-tier rows and marks the tenant
      * imported, TenantDataOverrideSource lays them in the tenant hop wherever the tenant has no published entry; from
      * then on it lays nothing for that tenant. Empty: no cutover.
+     * The IMPORTED marker is per TENANT, not per key (review S-b): a key added here later is laid for no tenant the import
+     * already marked. Any change to `legacy_data` ships with an import run in the same deploy.
      */
     'config_overrides' => [
         'legacy_data' => [],

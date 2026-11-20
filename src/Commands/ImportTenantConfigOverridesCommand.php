@@ -36,7 +36,13 @@ use Throwable;
  *   message (review S5: a query exception's message carries the SQL and its bindings). A key the section declares secret
  *   is stored encrypted by the store and served redacted, like any secret override.
  *
- * An OWNER/runbook deploy step (lead 06:23Z, Q5): run against a live database only by the owner.
+ * An OWNER/runbook deploy step (lead 06:23Z, Q5): run against a live database only by the owner. The runbook (review
+ * S-b, S-e, N7):
+ * - Run it in the SAME deploy that enables `legacy_data`: before it runs, the Config area shows platform values where
+ *   the runtime lays legacy ones, and every hop pays the cutover source's validation.
+ * - The marker is per TENANT: a key added to `legacy_data` later needs the import run again in that deploy.
+ * - A host that caches stancl's tenant resolver must clear that cache after the import (or wait out its TTL): until then
+ *   a cached tenant model lacks the marker, and an override it unsets in that window brings its legacy value back.
  */
 class ImportTenantConfigOverridesCommand extends Command
 {
