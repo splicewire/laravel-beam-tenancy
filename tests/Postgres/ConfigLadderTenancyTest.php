@@ -15,6 +15,7 @@ use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\LadderSection;
+use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\LegacySecretSection;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\ReadsLadderConfigJob;
 use Splicewire\Beam\Tenancy\Tests\Postgres\PostgresTestCase;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
@@ -569,4 +570,74 @@ it('takes a null or absent legacy value as no override, and a host naming no leg
     config()->set('beam.tenancy.config_overrides.legacy_data', []);
     $bravo = cs09WithData(cs07Schema('bravo'), ['legacy_theme' => 'neon']);
     expect(cs09Inside($bravo)['theme'])->toBe('light', 'no map, no cutover');
+});
+
+/*
+ * config-sections ticket 09: the IMPORT (splicewire:beam:tenancy:import-config-overrides). Fake values only (F14).
+ */
+function cs09LegacyWithSecret(): void
+{
+    cs09Legacy();
+    // Secret overrides are stored with Laravel's `encrypted` cast; the harness boots no app key (a test-only key, as
+    // laravel-beam's ConfigTenantTierTest sets one).
+    config()->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
+    config()->set('beam.tenancy.config_overrides.legacy_data.legacy_stripe', ['root' => 'cs09sec', 'pointer' => '/secret']);
+    config()->set('cs09sec', ['secret' => null]);
+    app(ConfigSectionRegistry::class)->section(LegacySecretSection::class, owner: 'host');
+}
+
+function cs09Import(array $options = []): string
+{
+    Artisan::call('splicewire:beam:tenancy:import-config-overrides', $options);
+
+    return Artisan::output();
+}
+
+it('imports legacy values into published tenant-tier rows, idempotently, reporting per tenant and printing no value', function () {
+    cs07Bootstrappers();
+    cs09LegacyWithSecret();
+    $fake = 'sk_test_cs09_FAKE_not_a_real_key';
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'legacy_stripe' => $fake]);
+    cs07Schema('bravo');
+
+    $out = cs09Import();
+    expect($out)->toContain('alpha: imported (3)')
+        ->and($out)->toContain('bravo: nothing to import')
+        ->and($out)->not->toContain($fake)
+        ->and($out)->not->toContain('neon');
+
+    // The rows now carry the values: with the legacy data gone, the hop still has them.
+    $alpha = cs09WithData($alpha, ['legacy_theme' => null, 'legacy' => null, 'legacy_stripe' => null]);
+    tenancy()->initialize($alpha);
+    try {
+        expect([config('cs07.theme'), config('cs07.review'), config('cs09sec.secret')])->toBe(['neon', true, $fake]);
+        $row = DB::table(Beam::table('config_overrides'))->where('section', 'cs09sec')->where('pointer', '/secret')->first(['value', 'encrypted_value']);
+        expect($row->value)->toBeNull('a secret is never stored in the plain value column')
+            ->and($row->encrypted_value)->not->toBeNull()
+            ->and($row->encrypted_value)->not->toContain($fake, 'encrypted at rest');
+    } finally {
+        tenancy()->end();
+    }
+    expect(config('cs09sec.secret'))->toBeNull('central never sees the tenant secret');
+
+    // Idempotent.
+    $again = cs09WithData($alpha, ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'legacy_stripe' => $fake]);
+    expect(cs09Import(['--tenant' => [$again->getTenantKey()]]))->toContain('alpha: already present');
+});
+
+it('writes nothing on a dry run, and reports a legacy value an operator lock stops as not importable', function () {
+    cs07Bootstrappers();
+    cs09LegacyWithSecret();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true]]);
+
+    expect(cs09Import(['--dry-run' => true]))->toContain('alpha: would import (2)');
+    tenancy()->initialize($alpha);
+    try {
+        expect(DB::table(Beam::table('config_scopes'))->where('section', 'cs07')->count())->toBe(0, 'the dry run wrote nothing');
+    } finally {
+        tenancy()->end();
+    }
+
+    app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->lock('cs07', '/review', 'Review policy is set by the operator.');
+    expect(cs09Import())->toContain('alpha: imported (1); not importable: cs07/review');
 });

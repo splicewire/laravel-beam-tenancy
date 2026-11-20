@@ -50,6 +50,7 @@ use Splicewire\Beam\Tenancy\Commands\PoolsMigrate;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\Commands\PoolsRole;
 use Splicewire\Beam\Tenancy\Commands\ReseatWorkspaceMembers;
+use Splicewire\Beam\Tenancy\Commands\ImportTenantConfigOverridesCommand;
 use Splicewire\Beam\Tenancy\Commands\SyntheticReportingCommand;
 use Splicewire\Beam\Tenancy\Contracts\TenantDnsProvider;
 use Splicewire\Beam\Tenancy\Contracts\TenantEdgeProvider;
@@ -654,6 +655,7 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
             ->hasCommand(ReseatWorkspaceMembers::class)
             // The reporting toggle's command-line twin of the `tenants/synthetic-reporting` operation.
             ->hasCommand(SyntheticReportingCommand::class)
+            ->hasCommand(ImportTenantConfigOverridesCommand::class)
             // Publish-only .stub migrations (NOT ->discoversMigrations(), which loads at runtime).
             // Declared order matters: `create_tenants_table` must sort ahead of the ALTERs below it,
             // and package-tools' generateMigrationName timestamps them in listed order.
