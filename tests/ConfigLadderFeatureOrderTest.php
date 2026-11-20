@@ -1,5 +1,6 @@
 <?php
 
+use Splicewire\Beam\Tenancy\Tests\Fixtures\RoleAlias\AppliesTenantDefaultModelBootstrapper;
 use Illuminate\Config\Repository;
 use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
 use Splicewire\Beam\Tenancy\Features\TenantModelCatalog;
@@ -49,13 +50,17 @@ it('lists the ladder bootstrapper after the cache bootstrapper in the shared har
 });
 
 it('keeps the role alias running after the catalog merge with the ladder bootstrapper listed', function () {
-    config()->set('tenancy.bootstrappers', [ConfigLadderTenancyBootstrapper::class]);
+    // config-sections 09 (review Q3): the alias expands the EFFECTIVE app.chat.default_model, so the role must reach it
+    // through the tenant tier, as the cutover source lays it at a host. The fixture bootstrapper stands in for that
+    // tier here, listed after the real ladder bootstrapper.
+    config()->set('tenancy.bootstrappers', [ConfigLadderTenancyBootstrapper::class, AppliesTenantDefaultModelBootstrapper::class]);
+    AppliesTenantDefaultModelBootstrapper::$found = null;
     foreach ([TenantModelCatalog::class, TenantRoleAlias::class] as $feature) {
         app($feature)->bootstrap(tenancy());
     }
 
     $tenant = Tenant::create(['id' => 'acme', 'slug' => 'acme', 'llm_config' => [
-        'preferred_model' => 'fast',
+        'ladder_default_model' => 'fast',
         'provider' => 'acme-llm',
         'models' => ['tenant-only-model' => ['label' => 'Tenant only']],
         'roles' => ['acme-llm' => ['fast' => 'tenant-only-model']],

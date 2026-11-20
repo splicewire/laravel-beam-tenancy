@@ -78,6 +78,28 @@ function cs15Inside(Tenant $tenant): array
 
 const CS15_FLAGSHIP = [TenantConfig::class, TenantModelCatalog::class, TenantRoleAlias::class];
 
+/** config-sections 09's feature list: stancl TenantConfig is gone; the ladder's tenant tier writes the default model. */
+const CS09_LADDER_FEATURES = [TenantModelCatalog::class, TenantRoleAlias::class];
+
+/** Stand in for 07's ConfigLadderTenancyBootstrapper: it lays `llm_config.ladder_default_model` in the bootstrap phase. */
+function cs09Ladder(): void
+{
+    config()->set('tenancy.bootstrappers', [Splicewire\Beam\Tenancy\Tests\Fixtures\RoleAlias\AppliesTenantDefaultModelBootstrapper::class]);
+    Splicewire\Beam\Tenancy\Tests\Fixtures\RoleAlias\AppliesTenantDefaultModelBootstrapper::$found = null;
+}
+
+/** A tenant whose ladder tier picks `$laddered` (a role or a model), with the role map that expands `fast`. */
+function cs09LadderTenant(string $id, string $laddered = 'fast', ?string $legacyPreferred = null): Tenant
+{
+    return Tenant::create(['id' => $id, 'slug' => $id, 'llm_config' => array_filter([
+        'ladder_default_model' => $laddered,
+        'preferred_model' => $legacyPreferred,
+        'provider' => 'acme-llm',
+        'models' => ['tenant-only-model' => ['label' => 'Tenant only']],
+        'roles' => ['acme-llm' => ['fast' => 'tenant-only-model']],
+    ], fn ($v) => $v !== null)]);
+}
+
 // Regression credited to 07's evidence probe (Cs07RoleAliasLeakProbeTest): the PROBE case, red on laravel-beam-tenancy ce8ed6f.
 it('restores central default_model after a role-picking tenant\'s hop in the flagship feature order', function () {
     cs15Features(CS15_FLAGSHIP);
@@ -91,9 +113,44 @@ it('restores central default_model after a role-picking tenant\'s hop in the fla
 });
 
 it('CONTROL: without stancl TenantConfig the role alias also restores central', function () {
-    cs15Features([TenantModelCatalog::class, TenantRoleAlias::class]);
+    // config-sections 09: with TenantConfig gone, the role reaches app.chat.default_model through the ladder's tenant tier.
+    cs09Ladder();
+    cs15Features(CS09_LADDER_FEATURES);
 
-    expect(cs15Inside(cs15RoleTenant('acme'))[0])->toBe('tenant-only-model')
+    expect(cs15Inside(cs09LadderTenant('acme'))[0])->toBe('tenant-only-model')
+        ->and(config('app.chat.default_model'))->toBe('floor-model');
+});
+
+/*
+ * config-sections 09 (review Q3): TenantConfig leaves tenancy.features, so the alias (a) boots without it and (b) expands
+ * the EFFECTIVE app.chat.default_model, i.e. the value the ladder's tenant tier laid, not the tenant's legacy DATA.
+ */
+it('boots with no stancl TenantConfig in tenancy.features (09\'s feature list): the guard tolerates its absence', function () {
+    config()->set('tenancy.features', CS09_LADDER_FEATURES);
+
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+
+    expect(true)->toBeTrue('no LogicException: there is no TenantConfig to come after');
+});
+
+it('expands a role the ladder\'s tenant tier laid, and restores central for the next tenant', function () {
+    cs09Ladder();
+    cs15Features(CS09_LADDER_FEATURES);
+
+    expect(cs15Inside(cs09LadderTenant('alpha'))[0])->toBe('tenant-only-model', 'the laddered role expands')
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central after the hop')
+        ->and(cs15Inside(cs15PlainTenant('bravo'))[0])->toBe('floor-model', 'the next tenant never sees it')
+        ->and(cs15Inside(cs09LadderTenant('gamma', 'floor-fast'))[0])->toBe('floor-fast', 'a laddered concrete model is left alone')
+        ->and(config('app.chat.default_model'))->toBe('floor-model');
+});
+
+it('expands the EFFECTIVE value: a tenant\'s published model beats a stale legacy role left in its data', function () {
+    // The tenant once picked the role `fast` (legacy data); its ladder tier now publishes a concrete model. Reading data,
+    // the alias would overwrite the published choice with the expanded stale role.
+    cs09Ladder();
+    cs15Features(CS09_LADDER_FEATURES);
+
+    expect(cs15Inside(cs09LadderTenant('acme', 'floor-fast', legacyPreferred: 'fast'))[0])->toBe('floor-fast')
         ->and(config('app.chat.default_model'))->toBe('floor-model');
 });
 
@@ -148,12 +205,15 @@ it('refuses the same order when the host lists its own SUBCLASS of TenantConfig'
     expect(true)->toBeTrue('the subclass listed first boots');
 });
 
-it('shows why that order is refused: TenantConfig after the alias captures the expanded model as central', function () {
+it('shows why that order is refused: listed before TenantConfig, the alias never sees the role, so the hop runs on it raw', function () {
     // tenancy.features unset, so nothing refuses: the features are bootstrapped by hand in the refused order.
     cs15Features([TenantRoleAlias::class, TenantConfig::class, TenantModelCatalog::class]);
 
-    expect(cs15Inside(cs15RoleTenant('acme', 'floor-fast'))[0])->toBe('fast', 'inside: TenantConfig overwrote the expansion with the raw role')
-        ->and(config('app.chat.default_model'))->toBe('floor-fast', 'after: TenantConfig restored the expanded model as "central"');
+    // config-sections 09: the alias expands the EFFECTIVE value, and listed first it reads it before TenantConfig maps
+    // the role. So it expands nothing: the hop runs on the raw role (still broken, hence the refusal), but TenantConfig
+    // no longer captures an expanded model as "central" (before 09 it did: central became 'floor-fast').
+    expect(cs15Inside(cs15RoleTenant('acme', 'floor-fast'))[0])->toBe('fast', 'inside: the raw role, never expanded')
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'after: central intact');
 });
 
 it('restores central with TenantRoleAlias listed BEFORE TenantModelCatalog', function () {
@@ -175,6 +235,10 @@ it('restores central with TenantRoleAlias listed BEFORE TenantModelCatalog', fun
  * (it asserts the leak as stancl produces it, with a fixture bootstrapper standing in for 07's). It cannot enforce 09's
  * fix, since it lists TenantConfig itself; the 07 + 09 interaction is carried as an acceptance item on ticket 09, whose
  * removal of TenantConfig's mapping closes it.
+ *
+ * config-sections 09: this case is KEPT unchanged, as the record of what stancl's TenantConfig does to any host that still
+ * lists it beside the ladder. The CLOSED case after it runs the same tenant on 09's feature list (no TenantConfig) and
+ * pins central clean; the app's AC6 host test checks the real list.
  */
 it('PREDICTED LEAK (07 + 09): stancl TenantConfig captures a bootstrapper-applied tenant value as central, and restores it', function () {
     config()->set('tenancy.bootstrappers', [Splicewire\Beam\Tenancy\Tests\Fixtures\RoleAlias\AppliesTenantDefaultModelBootstrapper::class]);
@@ -190,11 +254,24 @@ it('PREDICTED LEAK (07 + 09): stancl TenantConfig captures a bootstrapper-applie
         ->and(cs15Inside(cs15PlainTenant('bravo'))[0])->toBe('ladder-tenant-model', 'and the next tenant inherits it');
 });
 
+it('CLOSED (09): with stancl TenantConfig out of tenancy.features, the same ladder tenant leaves central untouched', function () {
+    // The PREDICTED LEAK case above, on 09's feature list: nothing captures the bootstrapper's value as "central".
+    cs09Ladder();
+    cs15Features(CS09_LADDER_FEATURES);
+
+    $tenant = Tenant::create(['id' => 'ladder', 'slug' => 'ladder', 'llm_config' => ['ladder_default_model' => 'ladder-tenant-model', 'preferred_model' => 'floor-fast', 'provider' => 'acme-llm']]);
+
+    expect(cs15Inside($tenant)[0])->toBe('ladder-tenant-model', 'inside: the ladder\'s value, the legacy data unmapped')
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central after the hop: no leak')
+        ->and(cs15Inside(cs15PlainTenant('bravo'))[0])->toBe('floor-model', 'and the next tenant sees central');
+});
+
 it('writes the CURRENT request\'s config, never the worker base, under Octane-style app reuse', function () {
     // Octane hands each request a CLONE of the worker's config. The features are bootstrapped once, at boot, against the
     // base. The role alias and the catalog must act on the request's clone and leave the base exactly as it was.
     // (stancl's own TenantConfig still holds the base repository; it is left out here and named in the audit.)
-    cs15Features([TenantModelCatalog::class, TenantRoleAlias::class]);
+    cs09Ladder();
+    cs15Features(CS09_LADDER_FEATURES);
     $base = app('config');
     $before = $base->all();
 
@@ -202,7 +279,7 @@ it('writes the CURRENT request\'s config, never the worker base, under Octane-st
     app()->instance('config', $request);
 
     try {
-        expect(cs15Inside(cs15RoleTenant('acme'))[0])->toBe('tenant-only-model', 'the request\'s clone expands the role')
+        expect(cs15Inside(cs09LadderTenant('acme'))[0])->toBe('tenant-only-model', 'the request\'s clone expands the role')
             ->and($request->get('app.chat.default_model'))->toBe('floor-model', 'and is restored after the hop');
     } finally {
         app()->instance('config', $base);

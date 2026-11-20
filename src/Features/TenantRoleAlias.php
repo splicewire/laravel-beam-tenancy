@@ -22,10 +22,10 @@ use WeakMap;
  * concrete-model-only; the cascade and its loud-fail guards learn no role vocabulary — the role is
  * gone by the time `app.chat.default_model` is read.
  *
- * Runs AFTER stancl's TenantConfig (which has set `app.chat.default_model` to the raw role string)
- * and AFTER {@see TenantModelCatalog} (which has merged the tenant catalog, so the expanded model
- * can be validated against it). A role that resolves to no catalog model fails loudly here — the
- * one place the merged map exists.
+ * It expands the EFFECTIVE `app.chat.default_model` (config-sections 09): the role the tenant tier of the Override Ladder
+ * laid there in the bootstrap phase, or, on a host that still lists stancl's TenantConfig, the raw role it mapped. It
+ * runs AFTER {@see TenantModelCatalog} (which has merged the tenant catalog, so the expanded model can be validated
+ * against it). A role that resolves to no catalog model fails loudly here — the one place the merged map exists.
  *
  * **Reverting (config-sections 15, HIGH).** It undoes ONLY its own layer, and does so FIRST: on stancl's
  * `RevertingToCentralContext`, which fires before the bootstrappers revert and before `TenantConfig` restores central on
@@ -35,7 +35,8 @@ use WeakMap;
  * `app.chat.default_model`, so the next tenant with no preferred model inherited another tenant's choice. It does not
  * listen to `RevertedToCentralContext` at all: a revert there could only do nothing or bring the bug back.
  *
- * Order: AFTER stancl's TenantConfig is REQUIRED and checked at boot ({@see refuseRunningBeforeTenantConfig()}). Listed
+ * Order: when a host lists stancl's TenantConfig at all, AFTER it is REQUIRED and checked at boot
+ * ({@see refuseRunningBeforeTenantConfig()}); a host without it (the ladder's hosts, config-sections 09) boots. Listed
  * before it, the hop shows the raw role, and TenantConfig captures the expanded model as its own "original". After
  * TenantModelCatalog is needed only for a role that resolves to a tenant-only model; the revert is correct in either
  * order there, and in any position among the bootstrappers.
@@ -68,10 +69,14 @@ class TenantRoleAlias implements Feature
 
     public function expandRole(Tenant $tenant): void
     {
-        $preferred = Arr::get($tenant, 'llm_config.preferred_model');
+        // config-sections 09 (review Q3): the role is read from the EFFECTIVE app.chat.default_model, whoever wrote it:
+        // the tenant tier of the Override Ladder (ConfigLadderTenancyBootstrapper and the cutover source, which lay a
+        // tenant's legacy preferred_model there), or stancl's TenantConfig on a host that still maps it. Reading tenant
+        // DATA instead would expand a stale legacy role over a tenant's newer published override.
+        $preferred = $this->config()->get('app.chat.default_model');
 
-        // Only a pinned role triggers expansion; a concrete preferred_model already passed through
-        // TenantConfig untouched, and a tenant with no roles behaves exactly as before.
+        // Only a pinned role triggers expansion; a concrete model is left exactly as it is, and a tenant with no roles
+        // behaves exactly as before.
         if (! is_string($preferred) || ! in_array($preferred, AppTenant::LLM_ROLES, true)) {
             return;
         }
