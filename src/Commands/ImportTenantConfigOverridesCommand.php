@@ -38,9 +38,11 @@ use Throwable;
  *
  * An OWNER/runbook deploy step (lead 06:23Z, Q5): run against a live database only by the owner. The runbook (review
  * S-b, S-e, N7):
- * - Run it in the SAME deploy that enables `legacy_data`: before it runs, the Config area shows platform values where
- *   the runtime lays legacy ones, and every hop pays the cutover source's validation.
- * - The marker is per TENANT: a key added to `legacy_data` later needs the import run again in that deploy.
+ * - Run it WHEN THE HOST'S CUTOVER PLAN SAYS SO, not by default in the deploy that enables `legacy_data`. A host whose
+ *   legacy writers still write `tenants.data` must move them to tenant-tier rows FIRST: an imported tenant ignores
+ *   `tenants.data` from then on, so a write there would no longer apply. Until it runs, the Config area shows platform
+ *   values where the runtime lays legacy ones, and every hop pays the cutover source's validation.
+ * - The marker is per TENANT: a key added to `legacy_data` later needs the import run again, on the same condition.
  * - A host that caches stancl's tenant resolver must clear that cache after the import (or wait out its TTL): until then
  *   a cached tenant model lacks the marker, and an override it unsets in that window brings its legacy value back.
  */

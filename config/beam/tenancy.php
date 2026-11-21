@@ -98,7 +98,9 @@ return [
      * imported, TenantDataOverrideSource lays them in the tenant hop wherever the tenant has no published entry; from
      * then on it lays nothing for that tenant. Empty: no cutover.
      * The IMPORTED marker is per TENANT, not per key (review S-b): a key added here later is laid for no tenant the import
-     * already marked. Any change to `legacy_data` ships with an import run in the same deploy.
+     * already marked. Any change to `legacy_data` needs an import run when the host's cutover plan says so; a host whose
+     * legacy writers still write `tenants.data` must move them to tenant-tier rows first (an imported tenant ignores
+     * `tenants.data`).
      */
     'config_overrides' => [
         'legacy_data' => [],
