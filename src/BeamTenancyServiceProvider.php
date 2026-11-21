@@ -809,6 +809,14 @@ class BeamTenancyServiceProvider extends PackageServiceProvider
         $this->registerStatusPresentation();
         $this->bindTenantModel();
 
+        // credential-scope 08: the roster reads (TenantMemberController roles, index) ask a scoped token for
+        // `{tenant}.view-members`; offered to the widest token set, read lazily so the bound tenant model names it.
+        if (method_exists(\Rushing\PermissionCascade\Authorization\DecisionNames::class, 'offer')) {
+            $this->app->make(\Rushing\PermissionCascade\Authorization\DecisionNames::class)->offer(
+                fn (): array => [\Rushing\PermissionCascade\Facades\PermissionNamer::assemble((string) config('tenancy.tenant_model', Tenant::class), 'view-members')],
+            );
+        }
+
         // config-sections 09: the synthetic-reporting toggle is an operator-tier live key of the Override Ladder; every
         // publish of it (Config area, op, command) is audited by the scope observer.
         $this->app->make(\Splicewire\Beam\Config\ConfigSectionRegistry::class)

@@ -25,3 +25,9 @@ the owner, by `pools:migrate` (`Pools\PoolMigrator`), never through a tenant fra
 another database server (`Pools\PoolRegistry`), and a tenant moves between pools with `pools:move`. _Avoid_: isolation level (the
 satellite Org ladder, app ADR-0057), tier (billing), row-based tenancy (an application discriminator,
 which the runbook still forbids).
+
+**Roster read name** — the name a scoped token carries to read the tenant's roster or its role options
+(`TenantMemberController` `index`, `roles`): `viewMembers` on the tenant, as the permission cascade derives it
+(`{tenant}.view-members`, `{tenant}.{id}.view-members`), the same names beam-accounts' own roster asks. Asked of a scoped
+token only, through the cascade's `authorizeCarried()` (fleet ADR 0006, credential-scope 08), and offered to the widest
+token set. The seat stays the principal half; the role and removal writes already ask `manageMembers` through the Gate.

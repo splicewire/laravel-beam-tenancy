@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Tenancy\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Rushing\LaravelDataSchemasScribe\Attributes\RequestFromData;
+use Rushing\PermissionCascade\Authorization\CredentialScopeGate;
 use Splicewire\Beam\Accounts\Data\MembershipData;
 use Splicewire\Beam\Accounts\Data\RoleOptionsData;
 use Splicewire\Beam\Accounts\Enums\Role;
@@ -17,6 +18,16 @@ use Splicewire\Beam\Tenancy\Seats\WorkspaceSeats;
 class TenantMemberController extends Controller
 {
     /**
+     * The roster reads' decision (credential-scope 08, 07's route-first sweep). `roles` and `index` answered any seat of
+     * the tenant with no decision, so a scoped token read the roster whatever it carried. A scoped token now carries
+     * `viewMembers` on the tenant as the cascade derives it (`{tenant}.view-members`, `{tenant}.{id}.view-members`, the
+     * names beam-accounts' own roster asks), through `CredentialScopeGate::authorizeCarried()`. The seat (tenant
+     * membership) stays the principal half; a session and a `*` token are unchanged. The writes below already ask
+     * `manageMembers` through the Gate.
+     */
+    public const VIEW_DECISION = 'viewMembers';
+
+    /**
      * List member roles
      *
      * The role vocabulary for this deployment, so a client can render role pickers without hardcoding
@@ -27,11 +38,15 @@ class TenantMemberController extends Controller
      */
     public function roles()
     {
+        $this->authorizeRosterRead();
+
         return response()->json(['data' => RoleOptionsData::current()]);
     }
 
     public function index(Request $request)
     {
+        $this->authorizeRosterRead();
+
         $tenant = tenant();
 
         $members = $tenant->users()->wherePivotNull('removed_at')->get()
@@ -51,6 +66,14 @@ class TenantMemberController extends Controller
      * opts out of the attribute for exactly that reason), and the tenancy one was the estate's lone
      * snake_case DTO besides. beam-accounts owns the membership projection; this reuses it.
      */
+    /** Refuse a scoped token that does not carry the roster read's name on the current tenant (coded 403). */
+    protected function authorizeRosterRead(): void
+    {
+        $gate = app(CredentialScopeGate::class);
+
+        $gate->authorizeCarried(request()->user(), self::VIEW_DECISION, $gate->derivedNames(self::VIEW_DECISION, tenant()));
+    }
+
     protected function presentMember(object $user): MembershipData
     {
         $joinedAt = $user->pivot->accepted_at;
