@@ -1227,3 +1227,65 @@ it('D2 MEDIUM: importInsideHop counts an already-cut-over root as already-import
         ->and($outcome->present)->toBeGreaterThan(0, 'app.chat is counted already-imported')
         ->and($outcome->completed())->toBeTrue('nothing was skipped, so the tenant may still be marked');
 });
+
+/*
+ * config-sections ticket 16 COMPLETION (LANE-B-1920): the operator's provider writer moved onto the app.chat ladder
+ * (TenantConfigOverridePublisher::setChatDefaults publishes `default_provider`) and no longer writes `llm_config.provider`.
+ * TenantRoleAlias::expandRole reads the ROLE from the effective `app.chat.default_model` but used to read the PROVIDER from
+ * tenant DATA (`llm_config.providers.text`, else `llm_config.provider`). So for a role-pinned tenant whose operator moved
+ * to a new provider, the published provider was ignored and the role expanded through the stale legacy provider; with no
+ * legacy provider at all, expandRole threw. The fix reads the EFFECTIVE `app.chat.default_provider` after `providers.text`
+ * and before the legacy provider — the same ladder the role is read from. `app.chat` is the {@see ChatLadderSection}
+ * fixture; roles stay in `llm_config` (deploy-only), so the role map is tenant data here. Fake model/provider ids (F14).
+ */
+it('expands a pinned role through the operator-published provider on the ladder, not the tenant\'s stale legacy provider', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+
+    // The tenant keeps a role map for TWO providers and a stale legacy single provider (provider-a). Since ticket 16 the
+    // operator no longer writes llm_config.provider, so this value can lag behind the operator's current choice.
+    $acme = cs09WithData(cs07Schema('acme'), ['llm_config' => [
+        'preferred_model' => 'fast',
+        'provider' => 'provider-a',
+        'models' => ['model-a' => ['label' => 'A model'], 'model-b' => ['label' => 'B model']],
+        'roles' => [
+            'provider-a' => ['fast' => 'model-a'],
+            'provider-b' => ['fast' => 'model-b'],
+        ],
+    ]]);
+
+    // The operator pins the role and publishes the CURRENT provider (B) onto the app.chat ladder. The publisher finishes
+    // app.chat's lazy cutover, so these published rows outrank the legacy tenants.data (legacy provider-a included).
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($acme, 'fast', 'provider-b');
+
+    // Inside the hop the role expands through the EFFECTIVE provider (B), to B's model — never provider-a's model-a.
+    expect(cs16ChatInside($acme))->toMatchArray([
+        'provider' => 'provider-b',   // CONTROL: the operator's published provider is the effective ladder value
+        'model' => 'model-b',         // the role expands through provider-b, not the stale legacy provider-a (-> model-a)
+    ])
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central reverts to the floor after the hop');
+});
+
+it('expands a pinned role for a tenant with NO legacy provider, through the published provider, instead of throwing', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+
+    // No `provider` key in llm_config at all: before the fix, the provider fallback resolved to null and expandRole threw
+    // "Role [fast] has no model for the tenant's current provider [none]." on every hop of this tenant.
+    $bravo = cs09WithData(cs07Schema('bravo'), ['llm_config' => [
+        'preferred_model' => 'fast',
+        'models' => ['model-b' => ['label' => 'B model']],
+        'roles' => ['provider-b' => ['fast' => 'model-b']],
+    ]]);
+
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($bravo, 'fast', 'provider-b');
+
+    // The hop initializes without throwing and the role expands through the published provider.
+    expect(cs16ChatInside($bravo))->toMatchArray([
+        'provider' => 'provider-b',
+        'model' => 'model-b',
+    ])
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central reverts to the floor after the hop');
+});

@@ -100,10 +100,16 @@ class TenantRoleAlias implements Feature
             return;
         }
 
-        // preferred_model roles are a TEXT-modality concern. Read the per-modality text provider
-        // (ticket 07) falling back to the legacy single provider, and the nested text roles falling
-        // back to the legacy flat roles map.
-        $provider = Arr::get($tenant, 'llm_config.providers.text') ?? Arr::get($tenant, 'llm_config.provider');
+        // preferred_model roles are a TEXT-modality concern. Read the per-modality text provider (ticket 07), then the
+        // EFFECTIVE app.chat.default_provider — the SAME ladder the role is read from above — and only then the legacy
+        // single provider. config-sections ticket 16 moved the operator's provider writer off `llm_config.provider`
+        // onto the ladder (TenantConfigOverridePublisher), so a tenant can keep a stale legacy provider while the
+        // operator publishes a new one; reading tenant DATA for the provider would then expand the role through the
+        // stale provider (or, with no legacy provider at all, throw). The legacy fallback stays live for a host that
+        // does not project its provider onto the ladder. The nested text roles fall back to the legacy flat roles map.
+        $provider = Arr::get($tenant, 'llm_config.providers.text')
+            ?? $this->config()->get('app.chat.default_provider')
+            ?? Arr::get($tenant, 'llm_config.provider');
         $roles = Arr::get($tenant, 'llm_config.roles', []);
         $textRoles = is_array($roles) && isset($roles['text']) && is_array($roles['text']) ? $roles['text'] : $roles;
         $model = is_string($provider) && is_array($textRoles)
