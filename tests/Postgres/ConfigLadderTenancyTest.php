@@ -12,9 +12,11 @@ use Splicewire\Beam\Config\Overrides\ConfigTenantOverlay;
 use Splicewire\Beam\Enums\ConfigTier;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
+use Splicewire\Beam\Tenancy\Config\TenantConfigOverrideImporter;
+use Splicewire\Beam\Tenancy\Config\TenantConfigOverridePublisher;
 use Splicewire\Beam\Tenancy\ConfigLadderTenancyBootstrapper;
-use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
+use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantDataOverrideSource;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\ChatLadderSection;
 use Splicewire\Beam\Tenancy\Tests\Fixtures\ConfigLadder\FailingImportStore;
@@ -714,7 +716,11 @@ it('S2: skips a legacy value its schema rejects, or that cannot be written at al
 it('S3: keeps the role expanded when laravel-beam\'s operator re-sync re-lays the tenant layer mid-hop', function () {
     cs07Bootstrappers();
     app(ConfigSectionRegistry::class)->section(ChatLadderSection::class, owner: 'host');
-    config()->set('app.chat', ['default_model' => 'floor-model', 'models' => ['floor-model' => ['label' => 'Floor']]]);
+    // The floor must declare the full app.chat shape, including default_provider: ChatLadderSection added it as a
+    // nullable Tenant-tier key, and schemastud keeps a nullable-with-default property REQUIRED on the stored
+    // (non-request) axis the AcceptanceGate validates. A floor without the key makes TenantDataOverrideSource::valid()
+    // reject every app.chat legacy entry, dropping the whole layer to floor-model (the S3 regression root 11-23 found).
+    config()->set('app.chat', ['default_model' => 'floor-model', 'default_provider' => null, 'models' => ['floor-model' => ['label' => 'Floor']]]);
     config()->set('beam.tenancy.config_overrides.legacy_data', [
         'llm_config.preferred_model' => ['root' => 'app.chat', 'pointer' => '/default_model'],
         'llm_config.models' => ['root' => 'app.chat', 'pointer' => '/models', 'entries' => true],
@@ -789,4 +795,435 @@ it('S5: a failed import prints the exception class, never its message or a value
         ->and($out)->toContain('alpha: failed (Illuminate\\Database\\QueryException')
         ->and($out)->not->toContain('neon-cs09-leak-probe')
         ->and($out)->not->toContain('insert into');
+});
+
+/*
+ * config-sections ticket 16: the tower writers (operator pinned model/provider, System › Models catalog, the promotion
+ * sink) publish a tenant's `app.chat` choices as TENANT-tier Override-Ladder versions through
+ * {@see TenantConfigOverridePublisher}, instead of writing stancl `llm_config`. The three writers live in the tower
+ * package; what is PROVEN here is the publisher they all call — laid in the hop, reverting with it, the legacy
+ * setLlmConfig null-semantics, the extend catalog, the lazy cutover, and a tier refusal surfacing (never a 200 no-op).
+ * `app.chat` is the {@see ChatLadderSection} fixture (ticket 16 added its `default_provider`). Fake model/provider ids
+ * only (F14).
+ */
+function cs16Chat(): void
+{
+    app(ConfigSectionRegistry::class)->section(ChatLadderSection::class, owner: 'host');
+    config()->set('app.chat', [
+        'default_model' => 'floor-model',
+        'default_provider' => null,
+        'models' => ['floor-model' => ['label' => 'Floor']],
+    ]);
+    // The host's cutover map: the publisher finishes it lazily on a tenant's first write.
+    config()->set('beam.tenancy.config_overrides.legacy_data', [
+        'llm_config.preferred_model' => ['root' => 'app.chat', 'pointer' => '/default_model'],
+        'llm_config.provider' => ['root' => 'app.chat', 'pointer' => '/default_provider'],
+        'llm_config.models' => ['root' => 'app.chat', 'pointer' => '/models', 'entries' => true],
+    ]);
+}
+
+/** @return array{model: mixed, provider: mixed, models: mixed} what `config('app.chat.*')` holds inside `$tenant`'s hop */
+function cs16ChatInside(Tenant $tenant): array
+{
+    tenancy()->initialize($tenant);
+
+    try {
+        return [
+            'model' => config('app.chat.default_model'),
+            'provider' => config('app.chat.default_provider'),
+            'models' => config('app.chat.models'),
+        ];
+    } finally {
+        tenancy()->end();
+    }
+}
+
+/** Run `$fn` inside `$tenant`'s hop: the in-hop writers (System › Models, the promotion sink) run with the hop held. */
+function cs16InHop(Tenant $tenant, Closure $fn): void
+{
+    tenancy()->initialize($tenant);
+
+    try {
+        $fn();
+    } finally {
+        tenancy()->end();
+    }
+}
+
+it('publishes a tenant operator-pin of model and provider as tenant-tier app.chat overrides, laid in that tenant\'s hop only', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+    $bravo = cs07Schema('bravo');
+
+    // The operator endpoint holds no hop: setChatDefaultsForTenant opens the target tenant's hop around the publish.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'alpha-model', 'alpha-provider');
+
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'alpha-model', 'provider' => 'alpha-provider'])
+        ->and(cs16ChatInside($bravo))->toMatchArray(['model' => 'floor-model', 'provider' => null], 'bravo inherits the floor, never alpha\'s pin')
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central never sees alpha')
+        // The lazy cutover is per ROOT (config-sections ticket 16, D2): a single app.chat write retires only app.chat's
+        // legacy, never the whole tenant — the whole-tenant marker stays unset so every OTHER root keeps laying from legacy.
+        ->and(TenantDataOverrideSource::importedRoot(Tenant::find('alpha'), 'app.chat'))->toBeTrue('the first write finishes app.chat\'s lazy cutover')
+        ->and(TenantDataOverrideSource::imported(Tenant::find('alpha')))->toBeFalse('one root\'s write never marks the whole tenant imported')
+        ->and(cs16ChatInside($alpha)['model'])->toBe('alpha-model', 'a second hop re-applies the published pin');
+
+    // The pin is alpha's own tenant-tier version, nowhere central.
+    expect(DB::connection('central')->table(Beam::table('config_scopes'))->where('section', 'app.chat')->count())->toBe(0, 'central holds no app.chat scope');
+});
+
+it('publishes a tenant pin through the publisher onto the tenant\'s OWN DATABASE on the one server, reads it back there, and leaves nothing on the central connection (LANE-B-0500 3a)', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+
+    // The own-DATABASE shape this harness stands up on a SINGLE server: a tenant whose rows live in a DIFFERENT
+    // Postgres database (pool_remote -> PG_TEST_DATABASE_pool2) than central, reached WITHOUT a second server
+    // (no CS07_PG2) -- the one-server own-database proof the relocation test's else-branch also lands on. It proves
+    // the amendment's condition directly for the publisher: the write runs on the tenant's RESOLVED connection, so
+    // the app.chat version is stored on the tenant's own database and the central connection holds no row.
+    // defineDatabaseMigrations drops pool_* (not tenant_*) schemas on the remote connection; drop a prior run's here.
+    foreach (DB::connection(PostgresTestCase::REMOTE_CONNECTION)->select("select schema_name from information_schema.schemata where schema_name like 'tenant\\_%'") as $row) {
+        DB::connection(PostgresTestCase::REMOTE_CONNECTION)->statement('drop schema "'.$row->schema_name.'" cascade');
+    }
+    $alpha = cs07Schema('alpha', PostgresTestCase::REMOTE_CONNECTION);
+
+    // central and the tenant's own database are two different databases on the one server.
+    expect(DB::connection('central')->selectOne('select current_database() as d')->d)->toBe(getenv('PG_TEST_DATABASE'))
+        ->and(PostgresTestCase::remoteDatabase())->not->toBe(getenv('PG_TEST_DATABASE'));
+
+    // The operator endpoint holds no hop: setChatDefaultsForTenant opens alpha's hop around the publish, so the write
+    // runs on alpha's resolved connection (its own database), not central.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'own-db-model', 'own-db-provider');
+
+    // The pin is effective inside the hop, and central reverts to the floor after it.
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'own-db-model', 'provider' => 'own-db-provider'])
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central reverts to the floor after the hop');
+
+    // The version is PHYSICALLY on the tenant's own database (current_database() is the pool-remote database), and the
+    // central connection holds no app.chat scope. A write that leaked to the central connection flips BOTH assertions:
+    // the tenant-database scope count drops to 0 and the central scope count rises to 1 (LANE-B-0500 3a mutation).
+    tenancy()->initialize($alpha);
+    expect(DB::connection('tenant')->selectOne('select current_database() as d')->d)->toBe(PostgresTestCase::remoteDatabase(), 'the publish and the read-back ran on the tenant\'s own database')
+        ->and(DB::table(Beam::table('config_scopes'))->where('section', 'app.chat')->count())->toBe(1, 'the app.chat version lives in the tenant\'s own database');
+    tenancy()->end();
+
+    expect(DB::connection('central')->table(Beam::table('config_scopes'))->where('section', 'app.chat')->count())->toBe(0, 'the central connection holds no app.chat scope -- the publisher never wrote there');
+});
+
+it('clears the pin only when both model and provider are null, and leaves an unmentioned field standing otherwise (legacy setLlmConfig semantics)', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+    $pub = app(TenantConfigOverridePublisher::class);
+
+    $pub->setChatDefaultsForTenant($alpha, 'm1', 'p1');
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'm1', 'provider' => 'p1']);
+
+    // Model alone: the provider is left standing (single-null leaves the other, the array_filter-drop-nulls merge).
+    $pub->setChatDefaultsForTenant($alpha, 'm2', null);
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'm2', 'provider' => 'p1'], 'the untouched provider stays');
+
+    // Provider alone: the model is left standing.
+    $pub->setChatDefaultsForTenant($alpha, null, 'p2');
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'm2', 'provider' => 'p2'], 'the untouched model stays');
+
+    // Both null clears the pin entirely, inheriting the floor — the legacy "both empty clears the carrier".
+    $pub->setChatDefaultsForTenant($alpha, null, null);
+    expect(cs16ChatInside($alpha))->toMatchArray(['model' => 'floor-model', 'provider' => null], 'both unset: back to the platform floor');
+});
+
+it('replaces the tenant extend catalog through setChatModels: adds and drops ids atop the floor, and refuses a floor-id collision with a visible error', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['m-a' => ['label' => 'A'], 'm-b' => ['label' => 'B']]));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->toContain('floor-model')->toContain('m-a')->toContain('m-b');
+
+    // The FULL desired map: m-b is dropped, m-c is added, m-a stays; the floor is never touched.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['m-a' => ['label' => 'A'], 'm-c' => ['label' => 'C']]));
+    $keys = array_keys(cs16ChatInside($alpha)['models']);
+    expect($keys)->toContain('m-a')->toContain('m-c')->toContain('floor-model')
+        ->and($keys)->not->toContain('m-b'); // a dropped id is unset, not left behind
+
+    // An extend id that collides with a platform-floor model is refused by the store — visible, never a silent no-op.
+    cs16InHop($alpha, function () use ($alpha) {
+        expect(fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['floor-model' => ['label' => 'Hijack']]))
+            ->toThrow(ValidationException::class);
+    });
+    expect(cs16ChatInside($alpha)['models']['floor-model'])->toBe(['label' => 'Floor'], 'the floor row is untouched by the refused write');
+});
+
+it('adds one model through addChatModel without reading or dropping the tenant\'s other published models', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['existing' => ['label' => 'Existing']]));
+    // The promotion sink offers a newly-discovered model: add-only, it never reads the current map.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->addChatModel($alpha, 'offered', ['label' => 'Offered']));
+
+    expect(array_keys(cs16ChatInside($alpha)['models']))->toContain('existing')->toContain('offered')->toContain('floor-model');
+});
+
+it('finishes the cutover on the first write, importing the legacy llm_config, so a model the tenant later drops never returns from the legacy data', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['llm_config' => [
+        'preferred_model' => 'legacy-model',
+        'provider' => 'legacy-provider',
+        'models' => ['legacy-only' => ['label' => 'Legacy only']],
+    ]]);
+    expect(TenantDataOverrideSource::imported($alpha))->toBeFalse()
+        // Before any write, the legacy values lay in the hop through the cutover source.
+        ->and(cs16ChatInside($alpha))->toMatchArray(['model' => 'legacy-model', 'provider' => 'legacy-provider']);
+
+    // The first publisher write imports the legacy data as published overrides, then applies its own op and marks the ROOT.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'pinned-model', null);
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::importedRoot($alpha, 'app.chat'))->toBeTrue('the first write finished app.chat\'s cutover')
+        ->and(TenantDataOverrideSource::imported($alpha))->toBeFalse('a single-root write leaves the whole-tenant marker unset')
+        ->and(array_keys(cs16ChatInside($alpha)['models']))->toContain('legacy-only') // the legacy catalog was imported
+        ->and(cs16ChatInside($alpha)['model'])->toBe('pinned-model', 'the pin overwrites the imported legacy default');
+
+    // The tenant drops its whole catalog: legacy-only is unset and, because the tenant is now imported, never re-laid.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, []));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->not->toContain('legacy-only') // the dropped model never comes back from tenants.data
+        ->and(cs16ChatInside($alpha)['model'])->toBe('pinned-model', 'the pin still stands');
+});
+
+it('refuses to write when the tenant has an unpublished app.chat draft, rather than publish that draft for them', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    // Mark imported so ensureImportedInHop is a no-op: this isolates publishInHop's own pending-draft guard.
+    app(TenantConfigOverrideImporter::class)->mark($alpha);
+    $alpha = Tenant::find('alpha');
+
+    // The tenant admin saved a draft they have not published.
+    cs16InHop($alpha, fn () => app(ConfigOverrideStore::class)->saveDraft('app.chat', [['pointer' => '/default_model', 'op' => 'set', 'value' => 'their-draft']]));
+
+    cs16InHop($alpha, function () use ($alpha) {
+        expect(fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['m-a' => ['label' => 'A']]))
+            ->toThrow(ValidationException::class);
+    });
+
+    // Their draft stays theirs (never published), and the publisher's write did not land.
+    cs16InHop($alpha, function () {
+        $scope = app(ConfigOverrideStore::class)->scope('app.chat');
+        expect($scope->published_version)->toBeNull('the tenant draft was never published for them')
+            ->and($scope->head_version)->not->toBeNull('their draft is still there');
+    });
+    expect(array_keys(cs16ChatInside($alpha)['models']))->not->toContain('m-a'); // the refused write left nothing
+});
+
+/*
+ * config-sections ticket 16 — LANE-B-0820 amend (coord-lead). Folded fixes, each red-first:
+ *   F1: a provider-qualified id (openai/gpt-4o) is ONE escaped pointer segment through setChatModels AND addChatModel.
+ *   F2: setChatModels(null) is the documented "clear every model" input, not a TypeError.
+ *   D1: pinnedChatDefaults reads the tenant's OWN pin PRESENCE (null when unpinned), so the "pinned" response round-trips.
+ *   D2: the lazy cutover is per ROOT — an app.chat write retires ONLY app.chat's legacy, never wedged by an unrelated
+ *       root's draft and never stranding another root's legacy; the bulk import still imports every root and marks the
+ *       tenant entirely. Fake model/provider ids only (F14).
+ */
+function cs16D2Fixture(): void
+{
+    app(ConfigSectionRegistry::class)->section(ChatLadderSection::class, owner: 'host');
+    config()->set('app.chat', ['default_model' => 'floor-model', 'default_provider' => null, 'models' => ['floor-model' => ['label' => 'Floor']]]);
+    config()->set('beam.tenancy.config_overrides.legacy_data', [
+        // app.chat — the root THIS unit's writers cut over.
+        'llm_config.preferred_model' => ['root' => 'app.chat', 'pointer' => '/default_model'],
+        'llm_config.models' => ['root' => 'app.chat', 'pointer' => '/models', 'entries' => true],
+        // cs07 — an UNRELATED root this unit never writes; its legacy must keep laying until the bulk import.
+        'legacy_theme' => ['root' => 'cs07', 'pointer' => '/theme'],
+        'legacy.review' => ['root' => 'cs07', 'pointer' => '/review'],
+    ]);
+}
+
+it('F1: a provider-qualified model id is ONE escaped pointer segment through setChatModels and addChatModel, never three', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['openai/gpt-4o' => ['label' => 'GPT-4o']]));
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->addChatModel($alpha, 'anthropic/claude-opus', ['label' => 'Opus']));
+
+    $models = cs16ChatInside($alpha)['models'];
+    expect($models)->toHaveKey('openai/gpt-4o')->toHaveKey('anthropic/claude-opus')
+        ->and($models['openai/gpt-4o'])->toBe(['label' => 'GPT-4o'], 'the id addresses ONE entry, not a nested openai -> gpt-4o tree')
+        ->and($models)->not->toHaveKey('openai', 'no malformed intermediate pointer from splitting the id on /');
+
+    // The published pointer is the RFC 6901 escape of ['models', 'openai/gpt-4o'] — a single segment (/ -> ~1), not /models/openai/gpt-4o.
+    cs16InHop($alpha, function () {
+        $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
+        $pointers = array_keys($store->publishedLayer($store->scope('app.chat')));
+        // the / in the id is escaped ~1 (one pointer segment), and the id was never split into /models/openai/gpt-4o
+        expect($pointers)->toContain('/models/openai~1gpt-4o')
+            ->and($pointers)->not->toContain('/models/openai');
+    });
+});
+
+it('F2: setChatModels(null) clears every published tenant model without throwing (the LlmModelsInputData clear case)', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['m-a' => ['label' => 'A'], 'm-b' => ['label' => 'B']]));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->toContain('m-a')->toContain('m-b');
+
+    // null is the documented "clear it" input: every published model is unset, the floor remains, and nothing throws.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, null));
+    $keys = array_keys(cs16ChatInside($alpha)['models']);
+    expect($keys)->not->toContain('m-a')->not->toContain('m-b')
+        ->and($keys)->toContain('floor-model'); // the platform floor is untouched by the clear
+});
+
+it('D1: pinnedChatDefaults reads the tenant\'s OWN pin presence — null when unpinned (never the inherited floor), and a null round-trip stays unpinned', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs07Schema('alpha');
+
+    // Unpinned: the hop lays the floor as the EFFECTIVE value, but the tenant has pinned nothing of its own.
+    cs16InHop($alpha, function () {
+        expect(config('app.chat.default_model'))->toBe('floor-model', 'the floor is the effective value in the hop')
+            ->and(app(TenantConfigOverridePublisher::class)->pinnedChatDefaults())
+            ->toBe(['model' => null, 'provider' => null], 'but the tenant\'s OWN pin is null, not the floor id');
+    });
+
+    // Round-trip the unpinned response: re-sending null for both writes NO pin (never the floor id as a hard pin).
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, null, null);
+    cs16InHop($alpha, function () {
+        $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
+        $scope = $store->scope('app.chat');
+        $published = $scope === null ? [] : array_keys($store->publishedLayer($scope));
+        expect($published)->not->toContain('/default_model') // the null round-trip wrote no default_model pin
+            ->and(app(TenantConfigOverridePublisher::class)->pinnedChatDefaults()['model'])->toBeNull();
+    });
+
+    // A real pin is reported back verbatim; clearing it returns to null (round-trips both ways).
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'alpha-pin', 'alpha-prov');
+    cs16InHop($alpha, fn () => expect(app(TenantConfigOverridePublisher::class)->pinnedChatDefaults())->toBe(['model' => 'alpha-pin', 'provider' => 'alpha-prov']));
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, null, null);
+    cs16InHop($alpha, fn () => expect(app(TenantConfigOverridePublisher::class)->pinnedChatDefaults())->toBe(['model' => null, 'provider' => null], 'clearing the pin returns to unpinned'));
+});
+
+it('D2: an unrelated root\'s pending draft never blocks an app.chat write (the lazy cutover is scoped to the root being written)', function () {
+    cs07Bootstrappers();
+    cs16D2Fixture();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'llm_config' => ['models' => ['legacy-only' => ['label' => 'Legacy only']]]]);
+
+    // The tenant admin has an UNPUBLISHED draft on the unrelated cs07 root.
+    cs16InHop($alpha, fn () => app(ConfigOverrideStore::class)->saveDraft('cs07', [['pointer' => '/review', 'op' => 'set', 'value' => false]]));
+
+    // The app.chat write succeeds: ensureImportedInHop imports ONLY app.chat, so cs07's pending draft cannot wedge it.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, ['m-a' => ['label' => 'A']]));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->toContain('m-a'); // the app.chat write landed despite cs07's draft
+
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::importedRoot($alpha, 'app.chat'))->toBeTrue('app.chat cut over')
+        ->and(TenantDataOverrideSource::importedRoot($alpha, 'cs07'))->toBeFalse('cs07 was NOT imported by the app.chat write')
+        ->and(TenantDataOverrideSource::imported($alpha))->toBeFalse('and the whole tenant is not marked');
+
+    // cs07's draft stays theirs (never published for them) and its legacy still lays for the unpublished key.
+    cs16InHop($alpha, function () {
+        $scope = app(ConfigOverrideStore::class)->scope('cs07');
+        expect($scope->published_version)->toBeNull('the cs07 draft was never published by the app.chat write')
+            ->and($scope->head_version)->not->toBeNull('their cs07 draft is still there');
+    });
+});
+
+it('D2: after app.chat cuts over per-root, every OTHER root keeps laying from legacy, and the bulk import later imports it and marks the tenant', function () {
+    cs07Bootstrappers();
+    cs16D2Fixture();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'llm_config' => ['preferred_model' => 'legacy-model', 'models' => ['legacy-only' => ['label' => 'Legacy only']]]]);
+
+    // app.chat cuts over on its own writer, retiring ONLY app.chat's legacy.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'pinned-model', null);
+    $alpha = Tenant::find('alpha');
+
+    // app.chat's own dropped model would never resurrect (per-root marker), AND cs07's legacy is untouched — still laid.
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, []));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->not->toContain('legacy-only') // app.chat's dropped model stays dropped (per-root cutover)
+        ->and(cs09Inside($alpha))->toMatchArray(['theme' => 'neon', 'review' => true], 'cs07 legacy still applies — the app.chat cutover never stranded it');
+
+    // The bulk import now runs: it imports cs07 (finds app.chat already published) and marks the WHOLE tenant.
+    expect(cs09Import())->toContain('alpha: ');
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::imported($alpha))->toBeTrue('the bulk import marks the whole tenant');
+
+    // With the legacy data gone, cs07's values survive as published rows — they were imported, not stranded.
+    $alpha = cs09WithData($alpha, ['legacy_theme' => null, 'legacy' => null]);
+    expect(cs09Inside($alpha))->toMatchArray(['theme' => 'neon', 'review' => true], 'cs07 imported to published rows');
+});
+
+it('D2: the bulk import still imports ALL roots at once and marks the tenant entirely (the per-root path never changed it)', function () {
+    cs07Bootstrappers();
+    cs16D2Fixture();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'llm_config' => ['preferred_model' => 'legacy-model', 'models' => ['legacy-only' => ['label' => 'Legacy only']]]]);
+
+    expect(cs09Import())->toContain('alpha: imported');
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::imported($alpha))->toBeTrue('the bulk import marks the whole tenant, as before');
+
+    // Every root's legacy is now a published row: with the legacy data gone, both roots still read their values.
+    $alpha = cs09WithData($alpha, ['legacy_theme' => null, 'legacy' => null, 'llm_config' => null]);
+    expect(cs09Inside($alpha))->toMatchArray(['theme' => 'neon', 'review' => true], 'cs07 imported')
+        ->and(cs16ChatInside($alpha))->toMatchArray(['model' => 'legacy-model'], 'app.chat imported');
+});
+
+/*
+ * config-sections ticket 16 — LANE-B-0925 MEDIUM (coord-lead). The whole-tenant bulk import must skip a root a lazy
+ * writer already cut over: its legacy is retired, and re-importing it would re-publish a value the tenant dropped after
+ * the cutover. Fixed in TenantConfigOverrideImporter::importInsideHop (the importedRoots skip at the top of the loop).
+ * Red-first against the pre-fix importInsideHop (no importedRoots skip): it reached $registered = sections->get($root)
+ * for the cut-over root and, finding /models/legacy-only uncovered, re-published it — resurrecting the dropped model
+ * and over-counting $imported.
+ */
+it('D2 MEDIUM: the bulk import skips an already-cut-over root, so a model the tenant dropped after the cutover is never resurrected as a published row', function () {
+    cs07Bootstrappers();
+    cs16D2Fixture();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'llm_config' => ['preferred_model' => 'legacy-model', 'models' => ['legacy-only' => ['label' => 'Legacy only']]]]);
+
+    // app.chat cuts over on its own writer (importing legacy-only among its models), then the tenant drops every model.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'pinned-model', null);
+    $alpha = Tenant::find('alpha');
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, []));
+    expect(array_keys(cs16ChatInside($alpha)['models']))->not->toContain('legacy-only'); // dropped at apply time (per-root legacy retired)
+
+    // The whole-tenant bulk import runs: app.chat is already in importedRoots, so importInsideHop must skip it rather
+    // than re-publish its retired legacy, and still mark the whole tenant.
+    expect(cs09Import())->toContain('alpha: ');
+    $alpha = Tenant::find('alpha');
+    expect(TenantDataOverrideSource::imported($alpha))->toBeTrue('the import still marks the whole tenant');
+
+    // With the legacy data cleared, the dropped model stays gone — the import did not resurrect it as a published row,
+    // and cs07's unrelated legacy was still imported, not stranded.
+    $alpha = cs09WithData($alpha, ['legacy_theme' => null, 'legacy' => null, 'llm_config' => null]);
+    expect(array_keys(cs16ChatInside($alpha)['models']))->not->toContain('legacy-only'); // the assertion that matters: no resurrection through the import
+    expect(cs09Inside($alpha))->toMatchArray(['theme' => 'neon', 'review' => true], 'cs07 was imported, not stranded by the skip');
+});
+
+it('D2 MEDIUM: importInsideHop counts an already-cut-over root as already-imported — never refused, never skipped — and writes nothing fresh for it', function () {
+    cs07Bootstrappers();
+    cs16D2Fixture();
+    $alpha = cs09WithData(cs07Schema('alpha'), ['legacy_theme' => 'neon', 'legacy' => ['review' => true], 'llm_config' => ['preferred_model' => 'legacy-model', 'models' => ['legacy-only' => ['label' => 'Legacy only']]]]);
+
+    // app.chat cuts over per-root; the tenant then drops every app.chat model.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'pinned-model', null);
+    $alpha = Tenant::find('alpha');
+    cs16InHop($alpha, fn () => app(TenantConfigOverridePublisher::class)->setChatModels($alpha, []));
+
+    // Read the outcome directly: cs07 (two entries) is imported fresh; app.chat is skipped as already-imported, so it
+    // contributes NOTHING to $imported — the pre-fix importer re-published app.chat's dropped legacy-only (imported == 3).
+    $map = (array) config('beam.tenancy.config_overrides.legacy_data');
+    $outcome = null;
+    cs16InHop($alpha, function () use ($alpha, $map, &$outcome) {
+        $outcome = app(TenantConfigOverrideImporter::class)->importInsideHop($alpha, $map, dry: false);
+    });
+
+    expect($outcome->imported)->toBe(2, 'only cs07\'s two entries are written fresh; app.chat is skipped, not resurrected')
+        ->and($outcome->refused)->toBe([], 'the already-cut-over app.chat root is never refused')
+        ->and($outcome->present)->toBeGreaterThan(0, 'app.chat is counted already-imported')
+        ->and($outcome->completed())->toBeTrue('nothing was skipped, so the tenant may still be marked');
 });

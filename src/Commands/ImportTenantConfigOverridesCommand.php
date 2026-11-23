@@ -3,13 +3,11 @@
 namespace Splicewire\Beam\Tenancy\Commands;
 
 use Illuminate\Console\Command;
-use Splicewire\Beam\Config\ConfigSectionRegistry;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
-use Splicewire\Beam\Config\Overrides\ConfigOverrideEntry;
-use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Config\Overrides\ConfigTenantOverlay;
-use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Tenancy\Config\TenantConfigOverrideImporter;
+use Splicewire\Beam\Tenancy\Config\TenantImportOutcome;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantDataOverrideSource;
 use Throwable;
@@ -54,7 +52,7 @@ class ImportTenantConfigOverridesCommand extends Command
 
     protected $description = "Import tenants' legacy tenants.data config values into their tenant tier (prints no values)";
 
-    public function handle(TenantDataOverrideSource $source, ConfigSectionRegistry $sections): int
+    public function handle(TenantConfigOverrideImporter $importer): int
     {
         $map = (array) config('beam.tenancy.config_overrides.legacy_data', []);
 
@@ -70,7 +68,7 @@ class ImportTenantConfigOverridesCommand extends Command
 
         foreach ($tenants as $tenant) {
             try {
-                $this->line($this->importOne($tenant, $source, $sections, $map, (bool) $this->option('dry-run')));
+                $this->line($this->importOne($tenant, $importer, $map, (bool) $this->option('dry-run')));
             } catch (ValidationException $e) {
                 // A store refusal (ConfigOverrideRefusal::because()): its message is the store's own sentence about a root
                 // or pointer, written to be shown to whoever wrote it, never a value.
@@ -86,112 +84,27 @@ class ImportTenantConfigOverridesCommand extends Command
         return $failed ? self::FAILURE : self::SUCCESS;
     }
 
-    /** @param  array<string, array{root: string, pointer: string, entries?: bool}>  $map */
-    protected function importOne(Tenant $tenant, TenantDataOverrideSource $source, ConfigSectionRegistry $sections, array $map, bool $dry): string
+    /**
+     * Import one tenant through the shared {@see TenantConfigOverrideImporter} and render its {@see TenantImportOutcome}
+     * as the per-tenant line (ticket 16: the import logic now lives in the service the API writers also use; this
+     * command keeps only the presentation and the dry-run/`--tenant` surface). A tenant whose legacy map is empty reads
+     * `nothing to import` and is left unmarked, as before; `imported (n)` / `already present` / `would import (n)` and
+     * the `not importable` / `draft pending, skipped` suffixes are unchanged.
+     *
+     * @param  array<string, array{root: string, pointer: string, entries?: bool}>  $map
+     */
+    protected function importOne(Tenant $tenant, TenantConfigOverrideImporter $importer, array $map, bool $dry): string
     {
-        $legacy = $source->legacy($tenant, $map);
-
-        if ($legacy === []) {
-            return "{$tenant->getTenantKey()}: nothing to import";
-        }
-
-        $imported = 0;
-        $present = 0;
-        $refused = [];
-        $skipped = [];
-
-        try {
-            tenancy()->initialize($tenant);
-            $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
-
-            foreach ($legacy as $root => $entries) {
-                $registered = $sections->get($root);
-
-                if ($registered === null) {
-                    array_push($refused, ...array_map(fn (string $p): string => "{$root}{$p} (no section)", array_keys($entries)));
-
-                    continue;
-                }
-
-                $scope = $store->scope($root);
-                $published = $scope === null ? [] : array_keys($store->publishedLayer($scope));
-
-                if ($scope !== null && $scope->head_version !== null && $scope->head_version !== $scope->published_version) {
-                    // The tenant has a saved draft it has not published: publishing ours would publish theirs too.
-                    $skipped[] = "{$root} (draft pending, skipped)";
-
-                    continue;
-                }
-
-                $fresh = [];
-
-                foreach ($entries as $pointer => $entry) {
-                    if (self::covered((string) $pointer, $published)) {
-                        $present++;
-                    } else {
-                        $fresh[$pointer] = $entry;
-                    }
-                }
-
-                if ($fresh === []) {
-                    continue;
-                }
-
-                // The central effective value: read inside the hop, but the store's central reading is what the
-                // runtime restricts against, and an import writes no tenant layer before this point.
-                $central = app(ConfigTenantOverlay::class)->central($root);
-                $kept = ConfigTenantOverlay::restrict($registered, $fresh, $store->locks($root), is_array($central) ? $central : null);
-
-                foreach (array_diff_key($fresh, $kept) as $pointer => $_) {
-                    $refused[] = "{$root}{$pointer} (locked, above the tenant ceiling, or a platform entry)";
-                }
-
-                if ($kept === [] || $dry) {
-                    $imported += count($kept);
-
-                    continue;
-                }
-
-                $ours = $store->saveDraft($root, array_values(array_map(
-                    fn (ConfigOverrideEntry $entry): array => ['pointer' => $entry->pointer, 'op' => 'set', 'value' => $entry->value],
-                    $kept,
-                )), 'import-config-overrides');
-                // Exactly the version just saved (no draft was pending, so it holds only the published layer plus ours).
-                $store->publishVersion($root, $ours->head_version);
-                $imported += count($kept);
-            }
-        } finally {
-            tenancy()->end();
-        }
-
-        if (! $dry && $skipped === []) {
-            // Central: the tenant model lives on the central connection, outside the hop.
-            $tenant->setAttribute(TenantDataOverrideSource::IMPORTED_MARKER, now()->toIso8601String());
-            $tenant->save();
-        }
+        $outcome = $importer->import($tenant, $map, $dry);
 
         $status = match (true) {
-            $imported > 0 => ($dry ? 'would import' : 'imported')." ({$imported})",
-            $present > 0 => 'already present',
+            $outcome->imported > 0 => ($dry ? 'would import' : 'imported')." ({$outcome->imported})",
+            $outcome->present > 0 => 'already present',
             default => 'nothing to import',
         };
 
         return "{$tenant->getTenantKey()}: {$status}"
-            .($refused === [] ? '' : '; not importable: '.implode(', ', $refused))
-            .($skipped === [] ? '' : '; '.implode(', ', $skipped).'; not marked imported');
-    }
-
-    /** @param  list<string|int>  $published */
-    protected static function covered(string $pointer, array $published): bool
-    {
-        foreach ($published as $at) {
-            $at = (string) $at;
-
-            if ($at === $pointer || $at === '' || str_starts_with($pointer, $at.'/')) {
-                return true;
-            }
-        }
-
-        return false;
+            .($outcome->refused === [] ? '' : '; not importable: '.implode(', ', $outcome->refused))
+            .($outcome->skipped === [] ? '' : '; '.implode(', ', $outcome->skipped).'; not marked imported');
     }
 }

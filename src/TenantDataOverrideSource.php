@@ -31,6 +31,12 @@ use Throwable;
  * - **It ends per tenant at the import.** The import marks each tenant it finished ({@see self::IMPORTED_MARKER} in
  *   `tenants.data`); a marked tenant gets NOTHING from this source, ever again. Its tenant-tier rows are the whole truth,
  *   so an override it later unsets in the Config area stays unset (review B1).
+ * - **It can also end one ROOT at a time, ahead of the whole-tenant import (config-sections ticket 16).** A lazy writer
+ *   ({@see \Splicewire\Beam\Tenancy\Config\TenantConfigOverridePublisher}) imports the single root it is about to write
+ *   and records it in {@see self::IMPORTED_ROOTS_MARKER}; this source then lays NOTHING for that root — exactly as the
+ *   whole-tenant marker does, but scoped to the one root — so a value the tenant later unsets on it is not re-laid
+ *   (resurrected) from legacy. EVERY OTHER root keeps laying from legacy until it too is imported or the whole tenant is
+ *   marked. Importing one root never strands the rest; only the whole-tenant marker retires legacy entirely.
  * - **A published row wins.** Before the import, a legacy value is laid only where the tenant has no published tenant-tier
  *   entry at its pointer or above it, so a key the tenant edits in the Config area takes over from its legacy value.
  * - **The same rules as a published row.** Legacy entries go through {@see ConfigTenantOverlay::restrict()}: a key whose
@@ -53,9 +59,33 @@ class TenantDataOverrideSource
     /** The `tenants.data` key the import sets on a tenant it finished; this source then lays nothing for that tenant. */
     public const IMPORTED_MARKER = 'config_overrides_imported_at';
 
+    /**
+     * The `tenants.data` key listing the roots a lazy writer cut over one at a time, ahead of the whole-tenant import
+     * (config-sections ticket 16); this source lays nothing for a listed root. A list, never a bare flag, so importing
+     * one root never strands another root's legacy values — the whole-tenant {@see self::IMPORTED_MARKER} alone does that.
+     */
+    public const IMPORTED_ROOTS_MARKER = 'config_overrides_imported_roots';
+
     public static function imported(Tenant $tenant): bool
     {
         return data_get($tenant, self::IMPORTED_MARKER) !== null;
+    }
+
+    /**
+     * The roots this tenant has cut over on their own (a lazy writer imported each, ahead of the whole-tenant import).
+     *
+     * @return list<string>
+     */
+    public static function importedRoots(Tenant $tenant): array
+    {
+        $roots = data_get($tenant, self::IMPORTED_ROOTS_MARKER);
+
+        return is_array($roots) ? array_values(array_filter($roots, 'is_string')) : [];
+    }
+
+    public static function importedRoot(Tenant $tenant, string $root): bool
+    {
+        return in_array($root, self::importedRoots($tenant), true);
     }
 
     /**
@@ -76,7 +106,16 @@ class TenantDataOverrideSource
             return $layers;
         }
 
-        return $this->merge($layers, $this->legacy($tenant, $map));
+        $legacy = $this->legacy($tenant, $map);
+
+        // A root a lazy writer already cut over (config-sections ticket 16) is retired here one root at a time: drop its
+        // legacy so a value the tenant later unsets on it is not re-laid from legacy. Other roots are untouched.
+        $importedRoots = self::importedRoots($tenant);
+        if ($importedRoots !== []) {
+            $legacy = array_diff_key($legacy, array_fill_keys($importedRoots, true));
+        }
+
+        return $this->merge($layers, $legacy);
     }
 
     /**
