@@ -60,6 +60,17 @@
         "branch-alias": {
             "dev-main": "1.0.x-dev"
         },
+        "splicewire": {
+            "test-full": {
+                "db-env": {
+                    "PG_TEST_DATABASE": "database",
+                    "PG_TEST_HOST": "host",
+                    "PG_TEST_PORT": "port",
+                    "PG_TEST_USERNAME": "username",
+                    "PG_TEST_PASSWORD": "password"
+                }
+            }
+        },
         "merge-plugin": {
             "merge-dev": true,
             "include": [
