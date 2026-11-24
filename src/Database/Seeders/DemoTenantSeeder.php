@@ -8,20 +8,22 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
+use Spatie\Permission\Guard;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Database\Seeders\DemoTeamSeeder;
 use Splicewire\Beam\Accounts\Enums\Role;
 use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Accounts\Facades\BeamDemo;
 use Splicewire\Beam\Tenancy\Models\TenantUser;
-use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Splicewire\Beam\Tenancy\Tenant;
-use Spatie\Permission\Guard;
+use Splicewire\Beam\Tenancy\TenantProvisioningStatus;
 use Stancl\Tenancy\Contracts\TenantDatabaseManager;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Jobs\CreateDatabase;
+use Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLDatabaseManager;
 
 /**
  * Seats beam-accounts' role-differentiated demo roster on a **tenant**.
@@ -179,6 +181,17 @@ class DemoTenantSeeder extends Seeder
 
         if (empty($tenant->slug)) {
             $tenant->slug = $slug;
+        }
+
+        // Database names are server-wide: independent central stores share the demo ID.
+        // Persist once BEFORE save (and its provisioning listeners). Existing tenants,
+        // including legacy rows without db_name, must keep their original storage.
+        // Schema managers already scope the name inside the host's central database.
+        if (! $tenant->exists && $tenant instanceof TenantWithDatabase
+            && $tenant->getInternal('db_name') === null
+            && $this->databaseManager($tenant) instanceof PostgreSQLDatabaseManager) {
+            $name = (string) $tenant->database()->getName();
+            $tenant->setInternal('db_name', substr($name, 0, 30).'_'.str_replace('-', '', (string) Str::uuid()));
         }
 
         $tenant->save();
