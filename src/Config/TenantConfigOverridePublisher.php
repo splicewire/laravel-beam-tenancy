@@ -6,8 +6,10 @@ use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Config\JsonPointer;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideEntry;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
+use Splicewire\Beam\Config\Overrides\ConfigTenantOverlay;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
 use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Tenancy\Features\TenantRoleAlias;
 use Splicewire\Beam\Tenancy\Tenant;
 use Splicewire\Beam\Tenancy\TenantDataOverrideSource;
 
@@ -54,11 +56,27 @@ class TenantConfigOverridePublisher
      */
     public function setChatDefaultsForTenant(Tenant $tenant, ?string $model, ?string $provider): void
     {
+        // config-sections 16: this hop exists to change the chat defaults, so a stored role that cannot expand must not
+        // stop it (that would make the bad state unrepairable). TenantRoleAlias skips its refusal for THIS tenant's hop
+        // while the key is bound; every other hop still refuses. A container instance, not a static: forgotten in the
+        // finally (also on an exception), and under Octane bound in the request's sandbox container, which dies with it.
+        $container = app();
+        $outer = $container->bound(TenantRoleAlias::WRITER_HOP) ? $container->make(TenantRoleAlias::WRITER_HOP) : null;
+        $container->instance(TenantRoleAlias::WRITER_HOP, $tenant->getTenantKey());
+
         try {
             tenancy()->initialize($tenant);
             $this->setChatDefaults($tenant, $model, $provider);
         } finally {
-            tenancy()->end();
+            try {
+                tenancy()->end();
+            } finally {
+                if ($outer === null) {
+                    $container->offsetUnset(TenantRoleAlias::WRITER_HOP);
+                } else {
+                    $container->instance(TenantRoleAlias::WRITER_HOP, $outer);
+                }
+            }
         }
     }
 
@@ -68,13 +86,17 @@ class TenantConfigOverridePublisher
      * carrier's "both empty clears the carrier" did. Otherwise each NON-null field is set and a null field is left as it
      * stands — the legacy `array_filter`-drop-nulls merge, which only ever cleared both at once, never one alone. The
      * stored string may be a concrete model or a role (fast/reasoning/cheap); the Tenant hop expands a role on read, so
-     * nothing here expands it. CALLER HOLDS the tenant's hop.
+     * nothing here stores an expansion. But a write whose RESULTING role cannot expand is refused before anything is
+     * published ({@see self::refuseUnexpandableRole()}), because every later hop of the tenant would throw on it.
+     * CALLER HOLDS the tenant's hop.
      */
     public function setChatDefaults(Tenant $tenant, ?string $model, ?string $provider): void
     {
         $this->ensureImportedInHop($tenant);
 
         $published = $this->publishedLayer(self::ROOT);
+
+        $this->refuseUnexpandableRole($tenant, $published, $model, $provider);
 
         if ($model === null && $provider === null) {
             $ops = [
@@ -89,6 +111,39 @@ class TenantConfigOverridePublisher
         }
 
         $this->publishInHop(self::ROOT, $ops);
+    }
+
+    /**
+     * Refuse (config-sections 16) a write after which the tenant's effective `default_model` is a role with no model for
+     * its effective provider, so the state every hop refuses is never published. The resulting values are what the
+     * ladder will hold once this write lands: the argument, else the tenant's published pin (both null clears both),
+     * else the central value below the tenant tier. The role is resolved by the hop's own rule
+     * ({@see TenantRoleAlias::modelFor()}: the per-modality text provider, then that default provider, then the legacy
+     * provider) against the hop's merged catalog. A concrete model is not a role and is never refused here.
+     *
+     * @param  array<string, ConfigOverrideEntry>  $published
+     *
+     * @throws ValidationException naming the role and the provider, before anything is drafted
+     */
+    private function refuseUnexpandableRole(Tenant $tenant, array $published, ?string $model, ?string $provider): void
+    {
+        $clear = $model === null && $provider === null;
+        $central = (array) app(ConfigTenantOverlay::class)->central(self::ROOT);
+        $resultingModel = $model ?? ($clear ? null : $this->publishedString($published, self::DEFAULT_MODEL)) ?? ($central['default_model'] ?? null);
+
+        if (! is_string($resultingModel) || ! in_array($resultingModel, Tenant::LLM_ROLES, true)) {
+            return;
+        }
+
+        $resultingProvider = $provider ?? ($clear ? null : $this->publishedString($published, self::DEFAULT_PROVIDER)) ?? ($central['default_provider'] ?? null);
+
+        try {
+            TenantRoleAlias::modelFor($tenant, $resultingModel, $resultingProvider, (array) config(self::ROOT.'.models', []));
+        } catch (\InvalidArgumentException $unexpandable) {
+            throw ValidationException::withMessages([
+                'config' => $unexpandable->getMessage().' Pick a provider that maps this role, or a concrete model.',
+            ]);
+        }
     }
 
     /**

@@ -1292,3 +1292,166 @@ it('expands a pinned role for a tenant with NO legacy provider, through the publ
     ])
         ->and(config('app.chat.default_model'))->toBe('floor-model', 'central reverts to the floor after the hop');
 });
+
+/**
+ * config-sections 16, second completion (lead LANE-A-0095). A tenant can hold a published role with no provider that maps
+ * it: before this fix the publisher created that state itself (setChatDefaultsForTenant(t, 'fast', null)), and then its
+ * own hop threw on it, so neither the repair nor the clear could run (probe 0075). Now the writer's own hop is let
+ * through, the bad state is refused at write, and every ordinary hop still refuses it loudly.
+ */
+function cs16bBravo(): Tenant
+{
+    // Bravo maps `fast` only under provider-b and has NO legacy provider or preferred_model (the probe fixture).
+    return cs09WithData(cs07Schema('bravo'), ['llm_config' => [
+        'models' => ['model-b' => ['label' => 'B model']],
+        'roles' => ['provider-b' => ['fast' => 'model-b']],
+    ]]);
+}
+
+/** Publish raw tenant-tier app.chat ops straight through the store, bypassing the publisher's refusal (to build a bad state). */
+function cs16bPublishRaw(Tenant $tenant, array $ops): void
+{
+    cs16InHop($tenant, function () use ($ops): void {
+        $store = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
+        $draft = $store->saveDraft('app.chat', $ops, 'test');
+        $store->publishVersion('app.chat', $draft->head_version);
+    });
+}
+
+/** The message an ORDINARY hop of `$tenant` refuses with, or null when it initializes. Always leaves tenancy ended. */
+function cs16bHopRefusal(Tenant $tenant): ?string
+{
+    try {
+        tenancy()->initialize($tenant);
+
+        return null;
+    } catch (InvalidArgumentException $refused) {
+        return $refused->getMessage();
+    } finally {
+        tenancy()->end();
+    }
+}
+
+/** The tenant's own published app.chat pin, read from the published layer inside a hop of a tenant that can initialize. */
+function cs16bPin(Tenant $tenant): array
+{
+    $pin = null;
+    cs16InHop($tenant, function () use (&$pin): void {
+        $pin = app(TenantConfigOverridePublisher::class)->pinnedChatDefaults();
+    });
+
+    return $pin;
+}
+
+/** Bravo in the step-1 state: the role `fast` published with no provider, which no hop can expand. */
+function cs16bStranded(): Tenant
+{
+    $bravo = cs16bBravo();
+    cs16bPublishRaw($bravo, [['pointer' => '/default_model', 'op' => 'set', 'value' => 'fast']]);
+
+    expect(cs16bHopRefusal($bravo->fresh()))->toBe("Role [fast] has no model for the tenant's current provider [none].");
+
+    return $bravo->fresh();
+}
+
+it('16b A: REPAIRS a stranded role by publishing a provider that maps it, through the writer\'s own hop', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $bravo = cs16bStranded();
+
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($bravo, 'fast', 'provider-b');
+
+    expect(cs16ChatInside($bravo->fresh()))->toMatchArray(['provider' => 'provider-b', 'model' => 'model-b'])
+        ->and(config('app.chat.default_model'))->toBe('floor-model', 'central reverts to the floor after the hop')
+        ->and(app()->bound(TenantRoleAlias::WRITER_HOP))->toBeFalse('the writer-hop scope is gone after the call')
+        ->and(tenancy()->initialized)->toBeFalse();
+});
+
+it('16b A: CLEARS a stranded role (both null), and the next hop reads the floor', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $bravo = cs16bStranded();
+
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($bravo, null, null);
+
+    expect(cs16ChatInside($bravo->fresh()))->toMatchArray(['model' => 'floor-model', 'provider' => null])
+        ->and(cs16bPin($bravo->fresh()))->toBe(['model' => null, 'provider' => null])
+        ->and(app()->bound(TenantRoleAlias::WRITER_HOP))->toBeFalse();
+});
+
+it('16b B: REFUSES at write a role with no model for the resulting provider, and publishes nothing', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $bravo = cs16bBravo();
+    $publisher = app(TenantConfigOverridePublisher::class);
+    // Finish the lazy cutover first (it publishes the legacy models), so the version below is the one a refusal must keep.
+    $version = function () use ($bravo): ?string {
+        $v = null;
+        cs16InHop($bravo->fresh(), function () use (&$v): void {
+            $v = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->scope('app.chat')?->published_version;
+        });
+
+        return $v;
+    };
+    cs16InHop($bravo->fresh(), fn () => $publisher->ensureImportedInHop($bravo->fresh()));
+    $before = $version();
+
+    // No provider anywhere (the floor's default_provider is null, bravo has no legacy one): `fast` cannot expand.
+    expect(fn () => $publisher->setChatDefaultsForTenant($bravo->fresh(), 'fast', null))
+        ->toThrow(ValidationException::class, "Role [fast] has no model for the tenant's current provider [none].");
+    // A provider bravo has no role map for.
+    expect(fn () => $publisher->setChatDefaultsForTenant($bravo->fresh(), 'fast', 'provider-a'))
+        ->toThrow(ValidationException::class, "Role [fast] has no model for the tenant's current provider [provider-a].");
+
+    // Nothing was published: the published version is the same, the layer holds no pin, and the hop still initializes.
+    expect($version())->toBe($before)
+        ->and(cs16bPin($bravo->fresh()))->toBe(['model' => null, 'provider' => null]);
+    expect(cs16bHopRefusal($bravo->fresh()))->toBeNull();
+
+    // A provider-only change that would strand an already-published role is refused too, and the good pin stands.
+    $publisher->setChatDefaultsForTenant($bravo->fresh(), 'fast', 'provider-b');
+    expect(fn () => $publisher->setChatDefaultsForTenant($bravo->fresh(), null, 'provider-a'))
+        ->toThrow(ValidationException::class, "Role [fast] has no model for the tenant's current provider [provider-a].");
+    expect(cs16bPin($bravo->fresh()))->toBe(['model' => 'fast', 'provider' => 'provider-b']);
+
+    // A concrete model is not a role and is never refused by this rule, whatever the provider.
+    $publisher->setChatDefaultsForTenant($bravo->fresh(), 'model-b', 'provider-a');
+    expect(cs16bPin($bravo->fresh()))->toBe(['model' => 'model-b', 'provider' => 'provider-a']);
+});
+
+it('16b C: every ORDINARY hop of a stranded tenant still refuses loudly, also while another tenant\'s writer hop is bound', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $bravo = cs16bStranded();
+    $refusal = "Role [fast] has no model for the tenant's current provider [none].";
+
+    expect(cs16bHopRefusal($bravo))->toBe($refusal);
+
+    // The scope is keyed to ONE tenant: a writer hop bound for someone else lets bravo's ordinary hop through nothing.
+    app()->instance(TenantRoleAlias::WRITER_HOP, 'someone-else');
+    try {
+        expect(cs16bHopRefusal($bravo))->toBe($refusal);
+    } finally {
+        app()->offsetUnset(TenantRoleAlias::WRITER_HOP);
+    }
+});
+
+it('16b: the writer-hop scope does not leak when the publisher throws inside it', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    app(TenantRoleAlias::class)->bootstrap(tenancy());
+    $bravo = cs16bStranded();
+
+    // A refused write inside the writer's own hop (B): the exception escapes the publisher.
+    expect(fn () => app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($bravo, 'fast', 'provider-a'))
+        ->toThrow(ValidationException::class);
+
+    // The scope is gone, the hop is ended, and bravo's next ordinary hop refuses exactly as before.
+    expect(app()->bound(TenantRoleAlias::WRITER_HOP))->toBeFalse()
+        ->and(tenancy()->initialized)->toBeFalse()
+        ->and(cs16bHopRefusal($bravo->fresh()))->toBe("Role [fast] has no model for the tenant's current provider [none].");
+});

@@ -47,6 +47,15 @@ use WeakMap;
  */
 class TenantRoleAlias implements Feature
 {
+    /**
+     * The container key {@see \Splicewire\Beam\Tenancy\Config\TenantConfigOverridePublisher::setChatDefaultsForTenant()}
+     * binds to the tenant key for the length of ITS OWN hop (config-sections 16). That hop exists to change the chat
+     * defaults, so a role that cannot expand must not stop it: the expansion is skipped there, and only there. It is a
+     * container instance, not a static: the publisher forgets it in a `finally`, and under Octane it lives in the
+     * request's sandbox container, so nothing outlives the call.
+     */
+    public const WRITER_HOP = 'beam.tenancy.role-alias.writer-hop';
+
     /** @var WeakMap<Repository, array{0: mixed}> the value found in each repository this feature wrote, before writing */
     protected WeakMap $applied;
 
@@ -60,7 +69,15 @@ class TenantRoleAlias implements Feature
         $this->refuseRunningBeforeTenantConfig();
 
         Event::listen(TenancyBootstrapped::class, function (TenancyBootstrapped $event) {
-            $this->expandRole($event->tenancy->tenant);
+            try {
+                $this->expandRole($event->tenancy->tenant);
+            } catch (\InvalidArgumentException $refused) {
+                // Every hop refuses loudly, except the chat-defaults writer's own hop for this tenant, which is there to
+                // repair or clear the very pin that cannot expand. The role stays unexpanded for that hop alone.
+                if (! self::isWriterHop($event->tenancy->tenant)) {
+                    throw $refused;
+                }
+            }
         });
 
         // config-sections 09 (review S3): the tenant tier is RE-laid mid-hop (laravel-beam's operator re-sync lifts the
@@ -100,35 +117,8 @@ class TenantRoleAlias implements Feature
             return;
         }
 
-        // preferred_model roles are a TEXT-modality concern. Read the per-modality text provider (ticket 07), then the
-        // EFFECTIVE app.chat.default_provider — the SAME ladder the role is read from above — and only then the legacy
-        // single provider. config-sections ticket 16 moved the operator's provider writer off `llm_config.provider`
-        // onto the ladder (TenantConfigOverridePublisher), so a tenant can keep a stale legacy provider while the
-        // operator publishes a new one; reading tenant DATA for the provider would then expand the role through the
-        // stale provider (or, with no legacy provider at all, throw). The legacy fallback stays live for a host that
-        // does not project its provider onto the ladder. The nested text roles fall back to the legacy flat roles map.
-        $provider = Arr::get($tenant, 'llm_config.providers.text')
-            ?? $this->config()->get('app.chat.default_provider')
-            ?? Arr::get($tenant, 'llm_config.provider');
-        $roles = Arr::get($tenant, 'llm_config.roles', []);
-        $textRoles = is_array($roles) && isset($roles['text']) && is_array($roles['text']) ? $roles['text'] : $roles;
-        $model = is_string($provider) && is_array($textRoles)
-            ? ($textRoles[$provider][$preferred] ?? null)
-            : null;
-
-        if (! is_string($model) || $model === '') {
-            throw new \InvalidArgumentException(
-                "Role [{$preferred}] has no model for the tenant's current provider [".(is_string($provider) ? $provider : 'none').'].'
-            );
-        }
-
         $config = $this->config();
-
-        if (! array_key_exists($model, (array) $config->get('app.chat.models', []))) {
-            throw new \InvalidArgumentException(
-                "Role [{$preferred}] resolves to [{$model}], which is not in the tenant model catalog."
-            );
-        }
+        $model = self::modelFor($tenant, $preferred, $config->get('app.chat.default_provider'), (array) $config->get('app.chat.models', []));
 
         // The first value found in this repository is the one to restore, even if a hop expands twice.
         if (! isset($this->applied[$config])) {
@@ -136,6 +126,53 @@ class TenantRoleAlias implements Feature
         }
 
         $config->set('app.chat.default_model', $model);
+    }
+
+    /**
+     * The concrete model a role expands to for `$tenant`, given the effective `app.chat.default_provider` and model
+     * catalog, or an {@see \InvalidArgumentException} naming why it cannot. Pure: it reads only its arguments, so the hop
+     * ({@see expandRole()}) and the chat-defaults writer (which checks the pin it is about to publish) share one rule.
+     *
+     * preferred_model roles are a TEXT-modality concern. Read the per-modality text provider (ticket 07), then the
+     * EFFECTIVE app.chat.default_provider — the SAME ladder the role is read from — and only then the legacy single
+     * provider. config-sections ticket 16 moved the operator's provider writer off `llm_config.provider` onto the ladder
+     * (TenantConfigOverridePublisher), so a tenant can keep a stale legacy provider while the operator publishes a new
+     * one; reading tenant DATA for the provider would then expand the role through the stale provider (or, with no legacy
+     * provider at all, throw). The legacy fallback stays live for a host that does not project its provider onto the
+     * ladder. The nested text roles fall back to the legacy flat roles map.
+     *
+     * @param  array<string, mixed>  $catalog  the effective `app.chat.models`
+     */
+    public static function modelFor(Tenant $tenant, string $role, mixed $defaultProvider, array $catalog): string
+    {
+        $provider = Arr::get($tenant, 'llm_config.providers.text')
+            ?? $defaultProvider
+            ?? Arr::get($tenant, 'llm_config.provider');
+        $roles = Arr::get($tenant, 'llm_config.roles', []);
+        $textRoles = is_array($roles) && isset($roles['text']) && is_array($roles['text']) ? $roles['text'] : $roles;
+        $model = is_string($provider) && is_array($textRoles)
+            ? ($textRoles[$provider][$role] ?? null)
+            : null;
+
+        if (! is_string($model) || $model === '') {
+            throw new \InvalidArgumentException(
+                "Role [{$role}] has no model for the tenant's current provider [".(is_string($provider) ? $provider : 'none').'].'
+            );
+        }
+
+        if (! array_key_exists($model, $catalog)) {
+            throw new \InvalidArgumentException(
+                "Role [{$role}] resolves to [{$model}], which is not in the tenant model catalog."
+            );
+        }
+
+        return $model;
+    }
+
+    /** Whether `$tenant`'s hop is the chat-defaults writer's own ({@see WRITER_HOP}). */
+    public static function isWriterHop(Tenant $tenant): bool
+    {
+        return app()->bound(self::WRITER_HOP) && app(self::WRITER_HOP) === $tenant->getTenantKey();
     }
 
     public function revert(): void
