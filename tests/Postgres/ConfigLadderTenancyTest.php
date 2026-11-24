@@ -1537,3 +1537,17 @@ it('keeps the legacy bag provider for a cut-over tenant read inside a DIFFERENT 
         ->and(cs16lpFastIn($bravo, $bravo))->toBe('stale-fast', 'never cut over: the bag, as before')
         ->and(cs16lpFastIn($alpha, $alpha))->toBe('pin-fast');
 });
+
+it('expands a cut-over tenant\'s role through its legacy provider when the ladder resolves no provider', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs16lpSeedStaleBag(cs07Schema('alpha'));
+
+    // Both empty cuts app.chat over with no pin, and this floor declares no default_provider: nothing resolves.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, null, null);
+    $alpha = Tenant::find('alpha');
+
+    expect(TenantDataOverrideSource::importedRoot($alpha, 'app.chat'))->toBeTrue('the precondition: cut over')
+        ->and(cs16ChatInside($alpha)['provider'])->toBeNull('the precondition: the ladder resolves no provider')
+        ->and(cs16lpFastIn($alpha, $alpha))->toBe('stale-fast');
+});

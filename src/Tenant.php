@@ -988,10 +988,14 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
         // provider is then the RESOLVED app.chat.default_provider (its pin, else the floor): the provider the chat call
         // is sent to, as TenantRoleAlias::modelFor already reads it. Outside a hop, in another tenant's hop, or before
         // the cutover, the legacy single provider IS the text provider, as before. The check reads only loaded attributes.
+        // A cut-over tenant whose ladder resolves no provider (a host that does not project one) keeps the legacy
+        // provider, in the same order TenantRoleAlias::modelFor reads it.
         if ($this->resolvesChatFromLadder()) {
             $provider = config('app.chat.default_provider');
 
-            return is_string($provider) && $provider !== '' ? $provider : null;
+            if (is_string($provider) && $provider !== '') {
+                return $provider;
+            }
         }
 
         return $this->llmProvider();
