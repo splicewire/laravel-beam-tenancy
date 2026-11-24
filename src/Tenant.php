@@ -22,6 +22,7 @@ use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Models\CentralActivityLog;
 use Splicewire\Beam\Models\HasStatuses;
 use Splicewire\Beam\Tenancy\Concerns\DesignatedSystemTenant;
+use Splicewire\Beam\Tenancy\Config\TenantConfigOverridePublisher;
 use Splicewire\Beam\Tenancy\Destinations\ProvisioningDestination;
 use Splicewire\Beam\Tenancy\Models\NullBillingAccount;
 use Splicewire\Beam\Tenancy\Models\TenantMachineIdentity;
@@ -966,8 +967,9 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
 
     /**
      * This tenant's Prism provider for a completion modality (ticket 07). Reads
-     * `providers[<modality>]`; for text it falls back to the legacy single `provider` so pre-ticket-07
-     * config resolves unchanged. Null when the tenant declares no provider for the modality.
+     * `providers[<modality>]`; for text it falls back to the resolved `app.chat.default_provider` inside this
+     * tenant's own hop once it has cut over for `app.chat`, and otherwise to the legacy single `provider`, so
+     * pre-ticket-07 config resolves unchanged. Null when the tenant declares no provider for the modality.
      */
     public function llmProviderFor(Modality $modality): ?string
     {
@@ -977,8 +979,35 @@ class Tenant extends BaseTenant implements TeamContract, TenantWithDatabase
             return $providers[$modality->value];
         }
 
-        // Back-compat: the legacy single provider IS the text provider.
-        return $modality === Modality::Text ? $this->llmProvider() : null;
+        if ($modality !== Modality::Text) {
+            return null;
+        }
+
+        // config-sections ticket 16 moved the operator's provider write onto the `app.chat` ladder, so once THIS tenant
+        // has cut over for app.chat its legacy `llm_config.provider` may be stale. Inside this tenant's own hop the text
+        // provider is then the RESOLVED app.chat.default_provider (its pin, else the floor): the provider the chat call
+        // is sent to, as TenantRoleAlias::modelFor already reads it. Outside a hop, in another tenant's hop, or before
+        // the cutover, the legacy single provider IS the text provider, as before. The check reads only loaded attributes.
+        if ($this->resolvesChatFromLadder()) {
+            $provider = config('app.chat.default_provider');
+
+            return is_string($provider) && $provider !== '' ? $provider : null;
+        }
+
+        return $this->llmProvider();
+    }
+
+    /** True inside this tenant's own hop once it has cut over for `app.chat` (whole-tenant import or that root alone). */
+    protected function resolvesChatFromLadder(): bool
+    {
+        $current = tenancy()->initialized ? tenancy()->tenant : null;
+
+        if ($current === null || $current->getTenantKey() !== $this->getTenantKey()) {
+            return false;
+        }
+
+        return TenantDataOverrideSource::imported($this)
+            || TenantDataOverrideSource::importedRoot($this, TenantConfigOverridePublisher::ROOT);
     }
 
     /**

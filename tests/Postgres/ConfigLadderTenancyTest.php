@@ -10,6 +10,7 @@ use Splicewire\Beam\Config\Overrides\ConfigOverlay;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Config\Overrides\ConfigTenantOverlay;
 use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Enums\Modality;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Tenancy\Commands\PoolsMove;
 use Splicewire\Beam\Tenancy\Config\TenantConfigOverrideImporter;
@@ -1454,4 +1455,85 @@ it('16b: the writer-hop scope does not leak when the publisher throws inside it'
     expect(app()->bound(TenantRoleAlias::WRITER_HOP))->toBeFalse()
         ->and(tenancy()->initialized)->toBeFalse()
         ->and(cs16bHopRefusal($bravo->fresh()))->toBe("Role [fast] has no model for the tenant's current provider [none].");
+});
+
+/*
+ * config-sections ticket 16, completion (LANE-A-0335/0370): Tenant::llmProviderFor(Text) — the provider a capability ROLE
+ * expands through (tower ThreadService) — follows the RESOLVED app.chat.default_provider inside the tenant's OWN hop once
+ * it has cut over for app.chat, because the operator's provider write moved onto the ladder and left the legacy
+ * `llm_config.provider` stale. Outside a hop, in another tenant's hop, or before the cutover it stays the legacy bag.
+ * Three providers alias the `fast` role differently, so the expanded model names the provider it went through.
+ */
+function cs16lpSeedStaleBag(Tenant $tenant): Tenant
+{
+    $tenant->llm_config = [
+        'provider' => 'stale-prov',
+        'capabilities' => ['chat' => 'fast'],
+        'roles' => ['text' => [
+            'stale-prov' => ['fast' => 'stale-fast'],
+            'pin-prov' => ['fast' => 'pin-fast'],
+            'floor-prov' => ['fast' => 'floor-fast'],
+        ]],
+    ];
+    $tenant->save();
+
+    return $tenant;
+}
+
+/** `$subject`'s text role `fast`, read while `$hop`'s hop is held. */
+function cs16lpFastIn(Tenant $hop, Tenant $subject): ?string
+{
+    tenancy()->initialize($hop);
+
+    try {
+        return $subject->llmRoleModelFor(Modality::Text, 'fast');
+    } finally {
+        tenancy()->end();
+    }
+}
+
+it('expands a capability role through the tenant\'s ladder-pinned provider in its own hop, not its stale legacy provider', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    $alpha = cs16lpSeedStaleBag(cs07Schema('alpha'));
+
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'floor-model', 'pin-prov');
+    $alpha = Tenant::find('alpha');
+
+    expect($alpha->llm_config['provider'])->toBe('stale-prov', 'the precondition: the bag provider is stale')
+        ->and(cs16lpFastIn($alpha, $alpha))->toBe('pin-fast')
+        ->and($alpha->llmRoleModelFor(Modality::Text, 'fast'))->toBe('stale-fast', 'outside any hop: the legacy bag');
+});
+
+it('expands a cut-over tenant\'s role through the floor provider when it holds no pin and its legacy provider is stale', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    config()->set('app.chat.default_provider', 'floor-prov');
+    $alpha = cs16lpSeedStaleBag(cs07Schema('alpha'));
+
+    // Both empty cuts app.chat over and leaves no pin: the imported legacy provider is unset again.
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, null, null);
+    $alpha = Tenant::find('alpha');
+
+    expect(TenantDataOverrideSource::importedRoot($alpha, 'app.chat'))->toBeTrue('the precondition: cut over')
+        ->and(cs16ChatInside($alpha)['provider'])->toBe('floor-prov', 'the precondition: no pin, the floor provider resolves')
+        ->and($alpha->llm_config['provider'])->toBe('stale-prov')
+        ->and(cs16lpFastIn($alpha, $alpha))->toBe('floor-fast');
+});
+
+it('keeps the legacy bag provider for a cut-over tenant read inside a DIFFERENT tenant\'s hop, and for a tenant never cut over', function () {
+    cs07Bootstrappers();
+    cs16Chat();
+    config()->set('app.chat.default_provider', 'floor-prov');
+    $alpha = cs16lpSeedStaleBag(cs07Schema('alpha'));
+    $bravo = cs16lpSeedStaleBag(cs07Schema('bravo'));
+
+    app(TenantConfigOverridePublisher::class)->setChatDefaultsForTenant($alpha, 'floor-model', 'pin-prov');
+    $alpha = Tenant::find('alpha');
+    $bravo = Tenant::find('bravo');
+
+    expect(TenantDataOverrideSource::importedRoot($bravo, 'app.chat'))->toBeFalse('the precondition: bravo never cut over')
+        ->and(cs16lpFastIn($bravo, $alpha))->toBe('stale-fast', 'alpha read in bravo\'s hop: bravo\'s resolved config is not alpha\'s')
+        ->and(cs16lpFastIn($bravo, $bravo))->toBe('stale-fast', 'never cut over: the bag, as before')
+        ->and(cs16lpFastIn($alpha, $alpha))->toBe('pin-fast');
 });
