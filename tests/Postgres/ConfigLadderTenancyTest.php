@@ -1272,10 +1272,13 @@ it('expands a pinned role for a tenant with NO legacy provider, through the publ
     cs16Chat();
     app(TenantRoleAlias::class)->bootstrap(tenancy());
 
-    // No `provider` key in llm_config at all: before the fix, the provider fallback resolved to null and expandRole threw
-    // "Role [fast] has no model for the tenant's current provider [none]." on every hop of this tenant.
+    // The state ticket 16 creates: the operator publishes BOTH the role and the provider onto the ladder, and the tenant's
+    // data never gets a provider. So bravo's llm_config has NO `preferred_model` and NO `provider` (only its models and
+    // role map): the publisher's own hop sees the floor model and publishes `fast` and provider-b. Before the fix, the
+    // provider fallback read tenant data only, resolved to null, and the read hop threw "Role [fast] has no model for
+    // the tenant's current provider [none]." (A legacy tenant already pinned to a role with no provider throws in the
+    // publisher's own hop, so this fixture does not build one.)
     $bravo = cs09WithData(cs07Schema('bravo'), ['llm_config' => [
-        'preferred_model' => 'fast',
         'models' => ['model-b' => ['label' => 'B model']],
         'roles' => ['provider-b' => ['fast' => 'model-b']],
     ]]);
