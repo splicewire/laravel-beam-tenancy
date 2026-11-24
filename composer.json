@@ -62,6 +62,7 @@
         },
         "splicewire": {
             "test-full": {
+                "runner": "serial",
                 "db-env": {
                     "PG_TEST_DATABASE": "database",
                     "PG_TEST_HOST": "host",
